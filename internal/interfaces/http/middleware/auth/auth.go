@@ -2,24 +2,20 @@ package auth
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"strings"
 
-	"github.com/go-chi/jwtauth/v5"
+	"github.com/ipede/user-manager-service/internal/infrastructure/jwt"
 	"go.uber.org/zap"
 )
 
 type AuthMiddleware struct {
-	auth   *jwtauth.JWTAuth
+	jwt    *jwt.JWT
 	logger *zap.Logger
 }
 
-func NewAuthMiddleware(secret string, logger *zap.Logger) *AuthMiddleware {
-	return &AuthMiddleware{
-		auth:   jwtauth.New("HS256", []byte(secret), nil),
-		logger: logger,
-	}
+func NewAuthMiddleware(jwt *jwt.JWT, logger *zap.Logger) *AuthMiddleware {
+	return &AuthMiddleware{jwt: jwt, logger: logger}
 }
 
 func (m *AuthMiddleware) Authenticator(next http.Handler) http.Handler {
@@ -30,16 +26,14 @@ func (m *AuthMiddleware) Authenticator(next http.Handler) http.Handler {
 			return
 		}
 
-		claims, err := m.validateToken(token)
+		claims, err := m.jwt.ValidateToken(token)
 		if err != nil {
 			http.Error(w, "Invalid token", http.StatusUnauthorized)
 			return
 		}
 
-		// Add claims to context
-		ctx := r.Context()
-		ctx = context.WithValue(ctx, "user_id", claims["user_id"])
-		ctx = context.WithValue(ctx, "roles", claims["roles"])
+		ctx := context.WithValue(r.Context(), "user_id", claims.UserID.String())
+		ctx = context.WithValue(ctx, "roles", claims.Roles)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -71,22 +65,4 @@ func (m *AuthMiddleware) extractToken(r *http.Request) string {
 		return strings.Split(bearToken, " ")[1]
 	}
 	return ""
-}
-
-func (m *AuthMiddleware) validateToken(tokenString string) (map[string]interface{}, error) {
-	token, err := m.auth.Decode(tokenString)
-	if err != nil {
-		return nil, err
-	}
-
-	if token == nil {
-		return nil, errors.New("invalid token")
-	}
-
-	claims := token.PrivateClaims()
-	if claims == nil {
-		return nil, errors.New("invalid claims")
-	}
-
-	return claims, nil
 }

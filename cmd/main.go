@@ -53,11 +53,11 @@ func main() {
 	}
 	defer db.Close()
 
-	// Initialize auth middleware
-	authMiddleware := auth.NewAuthMiddleware(cfg.JWTSecret, logger)
-
 	// Initialize JWT service
 	jwtService := jwt.New(cfg.JWTSecret, 24*time.Hour, 7*24*time.Hour) // 24h access token, 7d refresh token
+
+	// Initialize auth middleware
+	authMiddleware := auth.NewAuthMiddleware(jwtService, logger)
 
 	// Initialize user service
 	userService := application.NewUserService(db, jwtService, logger)
