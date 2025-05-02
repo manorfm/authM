@@ -6,22 +6,17 @@ import (
 
 	"github.com/ipede/user-manager-service/internal/domain"
 	"github.com/ipede/user-manager-service/internal/infrastructure/database"
-	"github.com/ipede/user-manager-service/internal/infrastructure/jwt"
 	"go.uber.org/zap"
 )
 
-// UserService implements the domain.UserService interface
 type UserService struct {
 	db     *database.Postgres
-	jwt    *jwt.JWT
 	logger *zap.Logger
 }
 
-// NewUserService creates a new UserService instance
-func NewUserService(db *database.Postgres, jwt *jwt.JWT, logger *zap.Logger) *UserService {
+func NewUserService(db *database.Postgres, logger *zap.Logger) *UserService {
 	return &UserService{
 		db:     db,
-		jwt:    jwt,
 		logger: logger,
 	}
 }

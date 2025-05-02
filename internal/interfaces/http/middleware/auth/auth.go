@@ -32,8 +32,8 @@ func (m *AuthMiddleware) Authenticator(next http.Handler) http.Handler {
 			return
 		}
 
-		ctx := context.WithValue(r.Context(), "user_id", claims.UserID.String())
-		ctx = context.WithValue(ctx, "roles", claims.Roles)
+		//ctx := context.WithValue(r.Context(), "user_id", claims.UserID.String())
+		ctx := context.WithValue(r.Context(), "roles", claims.Roles)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

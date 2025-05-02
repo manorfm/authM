@@ -9,8 +9,7 @@ import (
 )
 
 type Claims struct {
-	UserID ulid.ULID `json:"user_id"`
-	Roles  []string  `json:"roles"`
+	Roles []string `json:"roles"`
 	jwt.RegisteredClaims
 }
 
@@ -41,15 +40,16 @@ func (j *JWT) GenerateTokenPair(userID ulid.ULID, roles []string) (*TokenPair, e
 
 	// Generate access token
 	accessClaims := Claims{
-		UserID: userID,
-		Roles:  roles,
+		Roles: roles,
 		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   userID.String(),
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(j.accessDuration)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			ID:        ulid.Make().String(),
 		},
 	}
 
-	accessToken := jwt.NewWithClaims(jwt.SigningMethodHS256, accessClaims)
+	accessToken := jwt.NewWithClaims(jwt.SigningMethodHS512, accessClaims)
 	accessTokenString, err := accessToken.SignedString(j.secret)
 	if err != nil {
 		return nil, err
@@ -57,15 +57,16 @@ func (j *JWT) GenerateTokenPair(userID ulid.ULID, roles []string) (*TokenPair, e
 
 	// Generate refresh token
 	refreshClaims := Claims{
-		UserID: userID,
-		Roles:  roles,
+		Roles: roles,
 		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   userID.String(),
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(j.refreshDuration)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			ID:        ulid.Make().String(),
 		},
 	}
 
-	refreshToken := jwt.NewWithClaims(jwt.SigningMethodHS256, refreshClaims)
+	refreshToken := jwt.NewWithClaims(jwt.SigningMethodHS512, refreshClaims)
 	refreshTokenString, err := refreshToken.SignedString(j.secret)
 	if err != nil {
 		return nil, err

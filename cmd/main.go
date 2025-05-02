@@ -59,9 +59,11 @@ func main() {
 		cfg.JWTRefreshDuration,
 	)
 
-	service := application.NewUserService(db, jwtService, logger)
-	handlerUser := handlers.NewUserHandler(service, logger)
-	handlerAuth := handlers.NewAuthHandler(service, logger)
+	userService := application.NewUserService(db, logger)
+	handlerUser := handlers.NewUserHandler(userService, logger)
+
+	authService := application.NewAuthService(db, jwtService, logger)
+	handlerAuth := handlers.NewAuthHandler(authService, logger)
 
 	// Create router
 	router := chi.NewRouter()
@@ -72,15 +74,14 @@ func main() {
 	router.Use(middleware.RequestID)
 	router.Use(middleware.RealIP)
 	router.Use(middleware.Timeout(60 * time.Second))
-	router.Use(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Set default content type if not specified
-			if r.Header.Get("Accept") == "" {
-				r.Header.Set("Accept", "application/vnd.user-manager.v1+json")
-			}
-			next.ServeHTTP(w, r)
-		})
-	})
+	// router.Use(func(next http.Handler) http.Handler {
+	// 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// 		if r.Header.Get("Accept") == "" {
+	// 			r.Header.Set("Accept", "application/vnd.user-manager.v1+json")
+	// 		}
+	// 		next.ServeHTTP(w, r)
+	// 	})
+	// })
 
 	// Swagger documentation
 	router.Get("/swagger/*", httpSwagger.Handler(

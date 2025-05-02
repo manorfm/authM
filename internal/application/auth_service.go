@@ -12,14 +12,12 @@ import (
 	"go.uber.org/zap"
 )
 
-// UserService implements the domain.UserService interface
 type AuthService struct {
 	db     *database.Postgres
 	jwt    *jwt.JWT
 	logger *zap.Logger
 }
 
-// NewUserService creates a new UserService instance
 func NewAuthService(db *database.Postgres, jwt *jwt.JWT, logger *zap.Logger) *AuthService {
 	return &AuthService{
 		db:     db,
@@ -29,7 +27,7 @@ func NewAuthService(db *database.Postgres, jwt *jwt.JWT, logger *zap.Logger) *Au
 }
 
 // Register creates a new user
-func (s *UserService) Register(ctx context.Context, name, email, passwordStr, phone string) (*domain.User, error) {
+func (s *AuthService) Register(ctx context.Context, name, email, passwordStr, phone string) (*domain.User, error) {
 	// Check if user already exists
 	var count int
 	err := s.db.QueryRow(ctx, "SELECT COUNT(*) FROM users WHERE email = $1", email).Scan(&count)
@@ -69,14 +67,13 @@ func (s *UserService) Register(ctx context.Context, name, email, passwordStr, ph
 	return user, nil
 }
 
-// Login authenticates a user and returns a token pair
-func (s *UserService) Login(ctx context.Context, email, passwordStr string) (*domain.User, *domain.TokenPair, error) {
+func (s *AuthService) Login(ctx context.Context, email, passwordStr string) (*domain.User, *domain.TokenPair, error) {
 	// Get user by email
 	user := &domain.User{}
 	err := s.db.QueryRow(ctx, `
-		SELECT id, name, email, password, phone, created_at, updated_at
+		SELECT id, name, email, password, phone, created_at, updated_at, roles
 		FROM users WHERE email = $1
-	`, email).Scan(&user.ID, &user.Name, &user.Email, &user.Password, &user.Phone, &user.CreatedAt, &user.UpdatedAt)
+	`, email).Scan(&user.ID, &user.Name, &user.Email, &user.Password, &user.Phone, &user.CreatedAt, &user.UpdatedAt, &user.Roles)
 	if err != nil {
 		return nil, nil, domain.ErrInvalidCredentials
 	}
@@ -88,7 +85,7 @@ func (s *UserService) Login(ctx context.Context, email, passwordStr string) (*do
 	}
 
 	// Generate token pair
-	infraTokenPair, err := s.jwt.GenerateTokenPair(user.ID, []string{"user"})
+	infraTokenPair, err := s.jwt.GenerateTokenPair(user.ID, user.Roles)
 	if err != nil {
 		return nil, nil, err
 	}
