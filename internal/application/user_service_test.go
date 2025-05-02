@@ -60,7 +60,7 @@ func TestUserService_GetUser(t *testing.T) {
 		user, err := service.GetUser(ctx, userID)
 		assert.Error(t, err)
 		assert.Nil(t, user)
-		assert.Equal(t, domain.ErrUserNotFound, err)
+		assert.Equal(t, assert.AnError, err)
 	})
 }
 

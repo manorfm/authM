@@ -26,12 +26,12 @@ func (m *mockAuthService) Register(ctx context.Context, name, email, password, p
 	return args.Get(0).(*domain.User), args.Error(1)
 }
 
-func (m *mockAuthService) Login(ctx context.Context, email, password string) (*domain.User, *domain.TokenPair, error) {
+func (m *mockAuthService) Login(ctx context.Context, email, password string) (*domain.TokenPair, error) {
 	args := m.Called(ctx, email, password)
 	if args.Get(0) == nil {
-		return nil, nil, args.Error(2)
+		return nil, args.Error(1)
 	}
-	return args.Get(0).(*domain.User), args.Get(1).(*domain.TokenPair), args.Error(2)
+	return args.Get(0).(*domain.TokenPair), args.Error(1)
 }
 
 func TestAuthHandler_Register(t *testing.T) {
@@ -71,7 +71,7 @@ func TestAuthHandler_Register(t *testing.T) {
 			},
 			mockSetup: func() {
 				mockService.On("Register", mock.Anything, "Test User", "", "", "").
-					Return(nil, nil, domain.ErrInvalidCredentials)
+					Return(nil, domain.ErrInvalidCredentials)
 			},
 			expectedStatus: http.StatusBadRequest,
 		},
@@ -128,11 +128,6 @@ func TestAuthHandler_Login(t *testing.T) {
 			mockSetup: func() {
 				mockService.On("Login", mock.Anything, "test@example.com", "password123").
 					Return(
-						&domain.User{
-							ID:    domain.MustParseULID("01H9Z7K3Y4D5E6F7G8H9J0K1L2"),
-							Name:  "Test User",
-							Email: "test@example.com",
-						},
 						&domain.TokenPair{
 							AccessToken:  "access_token",
 							RefreshToken: "refresh_token",
@@ -150,7 +145,7 @@ func TestAuthHandler_Login(t *testing.T) {
 			},
 			mockSetup: func() {
 				mockService.On("Login", mock.Anything, "test@example.com", "wrongpassword").
-					Return(nil, nil, domain.ErrInvalidCredentials)
+					Return(nil, domain.ErrInvalidCredentials)
 			},
 			expectedStatus: http.StatusBadRequest,
 		},

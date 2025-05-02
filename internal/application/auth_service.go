@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/ipede/user-manager-service/internal/domain"
@@ -62,20 +63,23 @@ func (s *AuthService) Register(ctx context.Context, name, email, passwordStr, ph
 	return user, nil
 }
 
-func (s *AuthService) Login(ctx context.Context, email, passwordStr string) (*domain.User, *domain.TokenPair, error) {
+func (s *AuthService) Login(ctx context.Context, email, passwordStr string) (*domain.TokenPair, error) {
 	user, err := s.userRepo.FindByEmail(ctx, email)
 	if err != nil {
-		return nil, nil, domain.ErrInvalidCredentials
+		if err == domain.ErrUserNotFound {
+			return nil, domain.ErrInvalidCredentials
+		}
+		return nil, fmt.Errorf("failed to find user: %w", err)
 	}
 
 	err = password.CheckPassword(passwordStr, user.Password)
 	if err != nil {
-		return nil, nil, domain.ErrInvalidCredentials
+		return nil, domain.ErrInvalidCredentials
 	}
 
 	infraTokenPair, err := s.jwt.GenerateTokenPair(user.ID, user.Roles)
 	if err != nil {
-		return nil, nil, err
+		return nil, fmt.Errorf("failed to generate token: %w", err)
 	}
 
 	tokenPair := &domain.TokenPair{
@@ -83,5 +87,5 @@ func (s *AuthService) Login(ctx context.Context, email, passwordStr string) (*do
 		RefreshToken: infraTokenPair.RefreshToken,
 	}
 
-	return user, tokenPair, nil
+	return tokenPair, nil
 }

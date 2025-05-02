@@ -24,8 +24,16 @@ func NewUserService(userRepo domain.UserRepository, logger *zap.Logger) *UserSer
 func (s *UserService) GetUser(ctx context.Context, id domain.ULID) (*domain.User, error) {
 	user, err := s.userRepo.FindByID(ctx, id)
 	if err != nil {
-		return nil, domain.ErrUserNotFound
+		if err == domain.ErrUserNotFound {
+			return nil, domain.ErrUserNotFound
+		}
+		return nil, err
 	}
+
+	// Sanitize user data
+	user.Password = ""
+	user.Roles = nil
+
 	return user, nil
 }
 
@@ -45,5 +53,16 @@ func (s *UserService) UpdateUser(ctx context.Context, id domain.ULID, name, phon
 
 // ListUsers retrieves a list of users with pagination
 func (s *UserService) ListUsers(ctx context.Context, limit, offset int) ([]*domain.User, error) {
-	return s.userRepo.List(ctx, limit, offset)
+	users, err := s.userRepo.List(ctx, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+
+	// Sanitize user data
+	for _, user := range users {
+		user.Password = ""
+		user.Roles = nil
+	}
+
+	return users, nil
 }
