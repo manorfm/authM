@@ -15,6 +15,7 @@ import (
 	"github.com/ipede/user-manager-service/internal/infrastructure/config"
 	"github.com/ipede/user-manager-service/internal/infrastructure/database"
 	"github.com/ipede/user-manager-service/internal/infrastructure/jwt"
+	"github.com/ipede/user-manager-service/internal/infrastructure/repository"
 	"github.com/ipede/user-manager-service/internal/interfaces/http/handlers"
 	"github.com/ipede/user-manager-service/internal/interfaces/http/middleware/auth"
 	httpSwagger "github.com/swaggo/http-swagger"
@@ -59,10 +60,11 @@ func main() {
 		cfg.JWTRefreshDuration,
 	)
 
-	userService := application.NewUserService(db, logger)
+	userRepo := repository.NewUserRepository(db)
+	userService := application.NewUserService(userRepo, logger)
 	handlerUser := handlers.NewUserHandler(userService, logger)
 
-	authService := application.NewAuthService(db, jwtService, logger)
+	authService := application.NewAuthService(userRepo, jwtService, logger)
 	handlerAuth := handlers.NewAuthHandler(authService, logger)
 
 	// Create router

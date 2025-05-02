@@ -6,9 +6,9 @@ import (
 	"github.com/oklog/ulid/v2"
 )
 
-// UserRepository defines the interface for user persistence
+// UserRepository defines the interface for user data access
 type UserRepository interface {
-	// Create creates a new user
+	// Create creates a new user in the database
 	Create(ctx context.Context, user *User) error
 
 	// FindByID finds a user by ID
@@ -16,6 +16,9 @@ type UserRepository interface {
 
 	// FindByEmail finds a user by email
 	FindByEmail(ctx context.Context, email string) (*User, error)
+
+	// ExistsByEmail checks if a user exists with the given email
+	ExistsByEmail(ctx context.Context, email string) (bool, error)
 
 	// Update updates a user
 	Update(ctx context.Context, user *User) error
