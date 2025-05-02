@@ -9,17 +9,16 @@ import (
 	"testing"
 
 	"github.com/ipede/user-manager-service/internal/domain"
-	"github.com/oklog/ulid/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"
 )
 
-type mockUserService struct {
+type mockAuthService struct {
 	mock.Mock
 }
 
-func (m *mockUserService) Register(ctx context.Context, name, email, password, phone string) (*domain.User, error) {
+func (m *mockAuthService) Register(ctx context.Context, name, email, password, phone string) (*domain.User, error) {
 	args := m.Called(ctx, name, email, password, phone)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -27,7 +26,7 @@ func (m *mockUserService) Register(ctx context.Context, name, email, password, p
 	return args.Get(0).(*domain.User), args.Error(1)
 }
 
-func (m *mockUserService) Login(ctx context.Context, email, password string) (*domain.User, *domain.TokenPair, error) {
+func (m *mockAuthService) Login(ctx context.Context, email, password string) (*domain.User, *domain.TokenPair, error) {
 	args := m.Called(ctx, email, password)
 	if args.Get(0) == nil {
 		return nil, nil, args.Error(2)
@@ -35,31 +34,10 @@ func (m *mockUserService) Login(ctx context.Context, email, password string) (*d
 	return args.Get(0).(*domain.User), args.Get(1).(*domain.TokenPair), args.Error(2)
 }
 
-func (m *mockUserService) GetUser(ctx context.Context, id ulid.ULID) (*domain.User, error) {
-	args := m.Called(ctx, id)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*domain.User), args.Error(1)
-}
-
-func (m *mockUserService) UpdateUser(ctx context.Context, id ulid.ULID, name, phone string) error {
-	args := m.Called(ctx, id, name, phone)
-	return args.Error(0)
-}
-
-func (m *mockUserService) ListUsers(ctx context.Context, limit, offset int) ([]*domain.User, error) {
-	args := m.Called(ctx, limit, offset)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).([]*domain.User), args.Error(1)
-}
-
-func TestUserHandler_Register(t *testing.T) {
+func TestAuthHandler_Register(t *testing.T) {
 	logger, _ := zap.NewProduction()
-	mockService := new(mockUserService)
-	handler := New(mockService, logger)
+	mockService := new(mockAuthService)
+	handler := NewAuthHandler(mockService, logger)
 
 	tests := []struct {
 		name           string
@@ -130,10 +108,10 @@ func TestUserHandler_Register(t *testing.T) {
 	}
 }
 
-func TestUserHandler_Login(t *testing.T) {
+func TestAuthHandler_Login(t *testing.T) {
 	logger, _ := zap.NewProduction()
-	mockService := new(mockUserService)
-	handler := New(mockService, logger)
+	mockService := new(mockAuthService)
+	handler := NewAuthHandler(mockService, logger)
 
 	tests := []struct {
 		name           string

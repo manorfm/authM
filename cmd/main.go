@@ -60,7 +60,8 @@ func main() {
 	)
 
 	service := application.NewUserService(db, jwtService, logger)
-	handler := handlers.New(service, logger)
+	handlerUser := handlers.NewUserHandler(service, logger)
+	handlerAuth := handlers.NewAuthHandler(service, logger)
 
 	// Create router
 	router := chi.NewRouter()
@@ -95,21 +96,21 @@ func main() {
 
 	// Public routes
 	router.Group(func(r chi.Router) {
-		r.Post("/register", handler.HandleRegister)
-		r.Post("/login", handler.HandleLogin)
+		r.Post("/register", handlerAuth.HandleRegister)
+		r.Post("/login", handlerAuth.HandleLogin)
 	})
 
 	authMiddleware := auth.NewAuthMiddleware(jwtService, logger)
 	router.Group(func(r chi.Router) {
 		r.Use(authMiddleware.Authenticator, authMiddleware.RequireRole("admin"))
-		r.Get("/users", handler.HandleListUsers)
+		r.Get("/users", handlerUser.HandleListUsers)
 	})
 
 	// Protected routes
 	router.Group(func(r chi.Router) {
 		r.Use(authMiddleware.Authenticator)
-		r.Get("/users/{id}", handler.HandleGetUser)
-		r.Put("/users/{id}", handler.HandleUpdateUser)
+		r.Get("/users/{id}", handlerUser.HandleGetUser)
+		r.Put("/users/{id}", handlerUser.HandleUpdateUser)
 	})
 
 	// Start server

@@ -11,13 +11,13 @@ import (
 	"go.uber.org/zap"
 )
 
-type Handler struct {
+type HandlerUser struct {
 	service domain.UserService
 	logger  *zap.Logger
 }
 
-func New(service domain.UserService, logger *zap.Logger) *Handler {
-	return &Handler{
+func NewUserHandler(service domain.UserService, logger *zap.Logger) *HandlerUser {
+	return &HandlerUser{
 		service: service,
 		logger:  logger,
 	}
@@ -37,78 +37,7 @@ func validateRequest(w http.ResponseWriter, r *http.Request, req interface{}) er
 	return nil
 }
 
-func (h *Handler) HandleRegister(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Name     string `json:"name" validate:"required"`
-		Email    string `json:"email" validate:"required,email"`
-		Password string `json:"password" validate:"required"`
-		Phone    string `json:"phone"`
-	}
-
-	if err := validateRequest(w, r, &req); err != nil {
-		http.Error(w, "Invalid parameters", http.StatusBadRequest)
-		return
-	}
-
-	user, err := h.service.Register(r.Context(), req.Name, req.Email, req.Password, req.Phone)
-	if err != nil {
-		h.logger.Error("failed to register user", zap.Error(err))
-		if err == domain.ErrUserAlreadyExists {
-			http.Error(w, "User already exists", http.StatusConflict)
-			return
-		}
-		http.Error(w, "Failed to register user", http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusCreated)
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(user); err != nil {
-		h.logger.Error("failed to encode response", zap.Error(err))
-		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-		return
-	}
-}
-
-func (h *Handler) HandleLogin(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Email    string `json:"email" validate:"required,email"`
-		Password string `json:"password" validate:"required"`
-	}
-
-	if err := validateRequest(w, r, &req); err != nil {
-		http.Error(w, "Invalid parameters", http.StatusBadRequest)
-		return
-	}
-
-	user, tokens, err := h.service.Login(r.Context(), req.Email, req.Password)
-	if err != nil {
-		h.logger.Error("failed to login user", zap.Error(err))
-		if err == domain.ErrInvalidCredentials {
-			http.Error(w, "Invalid credentials", http.StatusBadRequest)
-			return
-		}
-		http.Error(w, "Failed to login", http.StatusInternalServerError)
-		return
-	}
-
-	response := struct {
-		User   *domain.User      `json:"user"`
-		Tokens *domain.TokenPair `json:"tokens"`
-	}{
-		User:   user,
-		Tokens: tokens,
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		h.logger.Error("failed to encode response", zap.Error(err))
-		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-		return
-	}
-}
-
-func (h *Handler) HandleGetUser(w http.ResponseWriter, r *http.Request) {
+func (h *HandlerUser) HandleGetUser(w http.ResponseWriter, r *http.Request) {
 	userID := chi.URLParam(r, "id")
 	if userID == "" {
 		http.Error(w, "User ID is required", http.StatusBadRequest)
@@ -140,7 +69,7 @@ func (h *Handler) HandleGetUser(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *Handler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) {
+func (h *HandlerUser) HandleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	userID := chi.URLParam(r, "id")
 	if userID == "" {
 		http.Error(w, "User ID is required", http.StatusBadRequest)
@@ -176,7 +105,7 @@ func (h *Handler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *Handler) HandleListUsers(w http.ResponseWriter, r *http.Request) {
+func (h *HandlerUser) HandleListUsers(w http.ResponseWriter, r *http.Request) {
 	limit := 10 // Default limit
 	offset := 0 // Default offset
 
