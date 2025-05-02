@@ -9,16 +9,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
 	"github.com/ipede/user-manager-service/internal/application"
 	"github.com/ipede/user-manager-service/internal/infrastructure/config"
 	"github.com/ipede/user-manager-service/internal/infrastructure/database"
 	"github.com/ipede/user-manager-service/internal/infrastructure/jwt"
 	"github.com/ipede/user-manager-service/internal/infrastructure/repository"
-	"github.com/ipede/user-manager-service/internal/interfaces/http/handlers"
+	httprouter "github.com/ipede/user-manager-service/internal/interfaces/http"
 	"github.com/ipede/user-manager-service/internal/interfaces/http/middleware/auth"
-	httpSwagger "github.com/swaggo/http-swagger"
 	"go.uber.org/zap"
 )
 
@@ -54,6 +51,7 @@ func main() {
 	}
 	defer db.Close()
 
+	// Initialize services
 	jwtService := jwt.New(
 		cfg.JWTSecret,
 		cfg.JWTAccessDuration,
@@ -62,66 +60,15 @@ func main() {
 
 	userRepo := repository.NewUserRepository(db)
 	userService := application.NewUserService(userRepo, logger)
-	handlerUser := handlers.NewUserHandler(userService, logger)
-
 	authService := application.NewAuthService(userRepo, jwtService, logger)
-	handlerAuth := handlers.NewAuthHandler(authService, logger)
+
+	// Initialize auth middleware
+	authMiddleware := auth.NewAuthMiddleware(jwtService, logger)
 
 	// Create router
-	router := chi.NewRouter()
-
-	// Add middleware
-	router.Use(middleware.Logger)
-	router.Use(middleware.Recoverer)
-	router.Use(middleware.RequestID)
-	router.Use(middleware.RealIP)
-	router.Use(middleware.Timeout(60 * time.Second))
-	// router.Use(func(next http.Handler) http.Handler {
-	// 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-	// 		if r.Header.Get("Accept") == "" {
-	// 			r.Header.Set("Accept", "application/vnd.user-manager.v1+json")
-	// 		}
-	// 		next.ServeHTTP(w, r)
-	// 	})
-	// })
-
-	// Swagger documentation
-	router.Get("/swagger/*", httpSwagger.Handler(
-		httpSwagger.URL(fmt.Sprintf("http://localhost:%s/swagger/doc.json", cfg.ServerPort)),
-		httpSwagger.DocExpansion("none"),
-		httpSwagger.DomID("swagger-ui"),
-	))
-
-	// Serve Swagger JSON
-	router.Get("/swagger/doc.json", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, "docs/swagger.json")
-	})
-
-	// Public routes
-	router.Group(func(r chi.Router) {
-		r.Post("/register", handlerAuth.HandleRegister)
-		r.Post("/login", handlerAuth.HandleLogin)
-	})
-
-	authMiddleware := auth.NewAuthMiddleware(jwtService, logger)
-	router.Group(func(r chi.Router) {
-		r.Use(authMiddleware.Authenticator, authMiddleware.RequireRole("admin"))
-		r.Get("/users", handlerUser.HandleListUsers)
-	})
-
-	// Protected routes
-	router.Group(func(r chi.Router) {
-		r.Use(authMiddleware.Authenticator)
-		r.Get("/users/{id}", handlerUser.HandleGetUser)
-		r.Put("/users/{id}", handlerUser.HandleUpdateUser)
-	})
+	router := httprouter.NewRouter(authService, userService, authMiddleware, logger)
 
 	// Start server
-	port := cfg.ServerPort
-	if port == "" {
-		port = "8080"
-	}
-
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%s", cfg.ServerPort),
 		Handler:      router,
