@@ -53,26 +53,25 @@ func main() {
 	}
 	defer db.Close()
 
-	// Initialize JWT service
-	jwtService := jwt.New(cfg.JWTSecret, 24*time.Hour, 7*24*time.Hour) // 24h access token, 7d refresh token
+	jwtService := jwt.New(
+		cfg.JWTSecret,
+		cfg.JWTAccessDuration,
+		cfg.JWTRefreshDuration,
+	)
 
-	// Initialize auth middleware
-	authMiddleware := auth.NewAuthMiddleware(jwtService, logger)
-
-	// Initialize user service
-	userService := application.NewUserService(db, jwtService, logger)
-
-	// Initialize handlers
-	userHandler := handlers.NewUserHandler(userService, logger)
+	service := application.NewUserService(db, jwtService, logger)
+	handler := handlers.New(service, logger)
 
 	// Create router
-	r := chi.NewRouter()
+	router := chi.NewRouter()
 
 	// Add middleware
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(60 * time.Second))
-	r.Use(func(next http.Handler) http.Handler {
+	router.Use(middleware.Logger)
+	router.Use(middleware.Recoverer)
+	router.Use(middleware.RequestID)
+	router.Use(middleware.RealIP)
+	router.Use(middleware.Timeout(60 * time.Second))
+	router.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Set default content type if not specified
 			if r.Header.Get("Accept") == "" {
@@ -83,48 +82,45 @@ func main() {
 	})
 
 	// Swagger documentation
-	r.Get("/swagger/*", httpSwagger.Handler(
+	router.Get("/swagger/*", httpSwagger.Handler(
 		httpSwagger.URL(fmt.Sprintf("http://localhost:%s/swagger/doc.json", cfg.ServerPort)),
 		httpSwagger.DocExpansion("none"),
 		httpSwagger.DomID("swagger-ui"),
 	))
 
 	// Serve Swagger JSON
-	r.Get("/swagger/doc.json", func(w http.ResponseWriter, r *http.Request) {
+	router.Get("/swagger/doc.json", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, "docs/swagger.json")
 	})
 
-	// API routes
-	r.Route("/", func(r chi.Router) {
-		// Public routes
-		r.Group(func(r chi.Router) {
-			r.Post("/users/register", userHandler.Register)
-			r.Post("/users/login", userHandler.Login)
-		})
-
-		// Protected routes
-		r.Group(func(r chi.Router) {
-			r.Use(authMiddleware.Authenticator)
-
-			r.Get("/users/me", userHandler.GetCurrentUser)
-			r.Put("/users/me", userHandler.UpdateCurrentUser)
-		})
-
-		// Admin routes
-		r.Group(func(r chi.Router) {
-			r.Use(authMiddleware.Authenticator)
-			r.Use(authMiddleware.RequireRole("admin"))
-
-			r.Get("/users", userHandler.ListUsers)
-			r.Get("/users/{id}", userHandler.GetUser)
-			r.Put("/users/{id}", userHandler.UpdateUser)
-		})
+	// Public routes
+	router.Group(func(r chi.Router) {
+		r.Post("/register", handler.HandleRegister)
+		r.Post("/login", handler.HandleLogin)
 	})
 
-	// Create server
+	authMiddleware := auth.NewAuthMiddleware(jwtService, logger)
+	router.Group(func(r chi.Router) {
+		r.Use(authMiddleware.Authenticator, authMiddleware.RequireRole("admin"))
+		r.Get("/users", handler.HandleListUsers)
+	})
+
+	// Protected routes
+	router.Group(func(r chi.Router) {
+		r.Use(authMiddleware.Authenticator)
+		r.Get("/users/{id}", handler.HandleGetUser)
+		r.Put("/users/{id}", handler.HandleUpdateUser)
+	})
+
+	// Start server
+	port := cfg.ServerPort
+	if port == "" {
+		port = "8080"
+	}
+
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%s", cfg.ServerPort),
-		Handler:      r,
+		Handler:      router,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  120 * time.Second,

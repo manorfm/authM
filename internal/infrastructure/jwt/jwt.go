@@ -8,7 +8,6 @@ import (
 	"github.com/oklog/ulid/v2"
 )
 
-// Claims represents the JWT claims
 type Claims struct {
 	UserID ulid.ULID `json:"user_id"`
 	Roles  []string  `json:"roles"`

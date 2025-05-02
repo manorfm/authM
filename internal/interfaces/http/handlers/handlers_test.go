@@ -59,7 +59,7 @@ func (m *mockUserService) ListUsers(ctx context.Context, limit, offset int) ([]*
 func TestUserHandler_Register(t *testing.T) {
 	logger, _ := zap.NewProduction()
 	mockService := new(mockUserService)
-	handler := NewUserHandler(mockService, logger)
+	handler := New(mockService, logger)
 
 	tests := []struct {
 		name           string
@@ -87,6 +87,17 @@ func TestUserHandler_Register(t *testing.T) {
 			expectedStatus: http.StatusCreated,
 		},
 		{
+			name: "invalid credentials",
+			requestBody: map[string]string{
+				"name": "Test User",
+			},
+			mockSetup: func() {
+				mockService.On("Register", mock.Anything, "Test User", "", "", "").
+					Return(nil, nil, domain.ErrInvalidCredentials)
+			},
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
 			name: "invalid request body",
 			requestBody: map[string]string{
 				"name": "Test User",
@@ -105,11 +116,11 @@ func TestUserHandler_Register(t *testing.T) {
 			tt.mockSetup()
 
 			body, _ := json.Marshal(tt.requestBody)
-			req := httptest.NewRequest("POST", "/users/register", bytes.NewBuffer(body))
+			req := httptest.NewRequest("POST", "/register", bytes.NewBuffer(body))
 			req.Header.Set("Content-Type", "application/json")
 
 			rr := httptest.NewRecorder()
-			handler.Register(rr, req)
+			handler.HandleRegister(rr, req)
 
 			assert.Equal(t, tt.expectedStatus, rr.Code)
 			if tt.expectedStatus == http.StatusCreated {
@@ -122,7 +133,7 @@ func TestUserHandler_Register(t *testing.T) {
 func TestUserHandler_Login(t *testing.T) {
 	logger, _ := zap.NewProduction()
 	mockService := new(mockUserService)
-	handler := NewUserHandler(mockService, logger)
+	handler := New(mockService, logger)
 
 	tests := []struct {
 		name           string
@@ -163,7 +174,7 @@ func TestUserHandler_Login(t *testing.T) {
 				mockService.On("Login", mock.Anything, "test@example.com", "wrongpassword").
 					Return(nil, nil, domain.ErrInvalidCredentials)
 			},
-			expectedStatus: http.StatusUnauthorized,
+			expectedStatus: http.StatusBadRequest,
 		},
 	}
 
@@ -176,7 +187,7 @@ func TestUserHandler_Login(t *testing.T) {
 			req.Header.Set("Content-Type", "application/json")
 
 			rr := httptest.NewRecorder()
-			handler.Login(rr, req)
+			handler.HandleLogin(rr, req)
 
 			assert.Equal(t, tt.expectedStatus, rr.Code)
 			mockService.AssertExpectations(t)

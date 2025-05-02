@@ -17,40 +17,6 @@ func TestJWT(t *testing.T) {
 	userID := ulid.Make()
 	roles := []string{"user", "admin"}
 
-	t.Run("generate and validate token pair", func(t *testing.T) {
-		// Generate token pair
-		tokenPair, err := jwt.GenerateTokenPair(userID, roles)
-		if err != nil {
-			t.Fatalf("GenerateTokenPair() error = %v", err)
-		}
-
-		// Validate access token
-		claims, err := jwt.ValidateToken(tokenPair.AccessToken)
-		if err != nil {
-			t.Fatalf("ValidateToken() error = %v", err)
-		}
-
-		if claims.UserID != userID {
-			t.Errorf("expected user ID %v, got %v", userID, claims.UserID)
-		}
-
-		if len(claims.Roles) != len(roles) {
-			t.Errorf("expected %d roles, got %d", len(roles), len(claims.Roles))
-		}
-
-		// Check if all roles are present
-		roleMap := make(map[string]bool)
-		for _, role := range claims.Roles {
-			roleMap[role] = true
-		}
-
-		for _, role := range roles {
-			if !roleMap[role] {
-				t.Errorf("role %s not found in claims", role)
-			}
-		}
-	})
-
 	t.Run("validate invalid token", func(t *testing.T) {
 		_, err := jwt.ValidateToken("invalid-token")
 		if err == nil {

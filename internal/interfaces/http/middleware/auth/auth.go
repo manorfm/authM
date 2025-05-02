@@ -38,7 +38,7 @@ func (m *AuthMiddleware) Authenticator(next http.Handler) http.Handler {
 	})
 }
 
-func (m *AuthMiddleware) RequireRole(role string) func(http.Handler) http.Handler {
+func (m *AuthMiddleware) RequireRole(role string) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			roles, ok := r.Context().Value("roles").([]string)
