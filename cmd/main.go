@@ -9,13 +9,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ipede/user-manager-service/internal/application"
 	"github.com/ipede/user-manager-service/internal/infrastructure/config"
 	"github.com/ipede/user-manager-service/internal/infrastructure/database"
 	"github.com/ipede/user-manager-service/internal/infrastructure/jwt"
-	"github.com/ipede/user-manager-service/internal/infrastructure/repository"
 	httprouter "github.com/ipede/user-manager-service/internal/interfaces/http"
-	"github.com/ipede/user-manager-service/internal/interfaces/http/middleware/auth"
 	"go.uber.org/zap"
 )
 
@@ -58,15 +55,8 @@ func main() {
 		cfg.JWTRefreshDuration,
 	)
 
-	userRepo := repository.NewUserRepository(db)
-	userService := application.NewUserService(userRepo, logger)
-	authService := application.NewAuthService(userRepo, jwtService, logger)
-
-	// Initialize auth middleware
-	authMiddleware := auth.NewAuthMiddleware(jwtService, logger)
-
 	// Create router
-	router := httprouter.NewRouter(authService, userService, authMiddleware, logger)
+	router := httprouter.NewRouter(db, jwtService, logger)
 
 	// Start server
 	server := &http.Server{

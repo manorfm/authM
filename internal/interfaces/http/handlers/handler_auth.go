@@ -64,6 +64,7 @@ func (h *HandlerAuth) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 }
 
@@ -88,6 +89,8 @@ func (h *HandlerAuth) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to login user", http.StatusInternalServerError)
 		return
 	}
+
+	w.Header().Set("Content-Type", "application/json")
 
 	if err := json.NewEncoder(w).Encode(tokenPair); err != nil {
 		h.logger.Error("failed to encode response", zap.Error(err))

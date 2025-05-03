@@ -43,6 +43,8 @@ func (h *HandlerUser) HandleGetUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.Header().Set("Content-Type", "application/json")
+
 	response := dto.NewUserResponse(user)
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		h.logger.Error("failed to encode response", zap.Error(err))
@@ -52,7 +54,6 @@ func (h *HandlerUser) HandleGetUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *HandlerUser) HandleListUsers(w http.ResponseWriter, r *http.Request) {
-	// Default values for pagination
 	limit := 10
 	offset := 0
 
@@ -67,6 +68,8 @@ func (h *HandlerUser) HandleListUsers(w http.ResponseWriter, r *http.Request) {
 	for i, user := range users {
 		response[i] = dto.NewUserResponse(user)
 	}
+
+	w.Header().Set("Content-Type", "application/json")
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		h.logger.Error("failed to encode response", zap.Error(err))
