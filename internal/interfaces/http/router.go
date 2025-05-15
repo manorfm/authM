@@ -33,6 +33,7 @@ func NewRouter(
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(authService, logger)
 	userHandler := handlers.NewUserHandler(userService, logger)
+	oidcHandler := handlers.NewOIDCHandler(authService, logger)
 
 	// Swagger documentation
 	router := createRouter()
@@ -50,8 +51,17 @@ func NewRouter(
 
 	// Public routes
 	router.Group(func(r chi.Router) {
-		r.Post("/register", authHandler.HandleRegister)
-		r.Post("/login", authHandler.HandleLogin)
+		r.Post("/register", authHandler.RegisterHandler)
+		r.Post("/login", authHandler.LoginHandler)
+	})
+
+	// OIDC routes
+	router.Group(func(r chi.Router) {
+		r.Get("/.well-known/openid-configuration", oidcHandler.HandleOpenIDConfiguration)
+		r.Get("/.well-known/jwks.json", oidcHandler.HandleJWKS)
+		r.Get("/oauth2/authorize", oidcHandler.HandleAuthorize)
+		r.Post("/oauth2/token", oidcHandler.HandleToken)
+		r.Get("/oauth2/userinfo", oidcHandler.HandleUserInfo)
 	})
 
 	// Admin routes

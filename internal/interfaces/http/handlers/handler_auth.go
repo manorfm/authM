@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 
@@ -9,17 +8,12 @@ import (
 	"go.uber.org/zap"
 )
 
-type AuthService interface {
-	Register(ctx context.Context, name, email, password, phone string) (*domain.User, error)
-	Login(ctx context.Context, email, password string) (*domain.TokenPair, error)
-}
-
 type HandlerAuth struct {
-	authService AuthService
+	authService domain.AuthService
 	logger      *zap.Logger
 }
 
-func NewAuthHandler(authService AuthService, logger *zap.Logger) *HandlerAuth {
+func NewAuthHandler(authService domain.AuthService, logger *zap.Logger) *HandlerAuth {
 	return &HandlerAuth{
 		authService: authService,
 		logger:      logger,
@@ -40,7 +34,7 @@ func NewAuthHandler(authService AuthService, logger *zap.Logger) *HandlerAuth {
 // 	return nil
 // }
 
-func (h *HandlerAuth) HandleRegister(w http.ResponseWriter, r *http.Request) {
+func (h *HandlerAuth) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
@@ -68,7 +62,7 @@ func (h *HandlerAuth) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 }
 
-func (h *HandlerAuth) HandleLogin(w http.ResponseWriter, r *http.Request) {
+func (h *HandlerAuth) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`

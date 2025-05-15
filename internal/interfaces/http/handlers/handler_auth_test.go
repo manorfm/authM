@@ -98,7 +98,7 @@ func TestAuthHandler_Register(t *testing.T) {
 			req.Header.Set("Content-Type", "application/json")
 
 			rr := httptest.NewRecorder()
-			handler.HandleRegister(rr, req)
+			handler.RegisterHandler(rr, req)
 
 			assert.Equal(t, tt.expectedStatus, rr.Code)
 			if tt.expectedStatus == http.StatusCreated {
@@ -160,7 +160,7 @@ func TestAuthHandler_Login(t *testing.T) {
 			req.Header.Set("Content-Type", "application/json")
 
 			rr := httptest.NewRecorder()
-			handler.HandleLogin(rr, req)
+			handler.LoginHandler(rr, req)
 
 			assert.Equal(t, tt.expectedStatus, rr.Code)
 			mockService.AssertExpectations(t)
