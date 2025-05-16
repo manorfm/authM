@@ -29,6 +29,14 @@ type JWT struct {
 	refreshDuration time.Duration
 }
 
+// JWTValidator defines the interface for JWT validation and JWKS retrieval
+// This allows for easier mocking in tests
+// Only the methods needed by the middleware are included
+type JWTValidator interface {
+	ValidateToken(token string) (*Claims, error)
+	GetJWKS() ([]interface{}, error)
+}
+
 // New creates a new JWT service
 func New(accessDuration, refreshDuration time.Duration) (*JWT, error) {
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -114,4 +122,10 @@ func (j *JWT) ValidateToken(tokenString string) (*Claims, error) {
 	}
 
 	return nil, errors.New("invalid token")
+}
+
+// Ensure *JWT implements JWTValidator
+func (j *JWT) GetJWKS() ([]interface{}, error) {
+	// TODO: Implement actual JWKS logic if needed
+	return nil, nil
 }

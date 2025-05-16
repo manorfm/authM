@@ -29,18 +29,12 @@ func NewRouter(
 	userRepo := repository.NewUserRepository(db)
 	userService := application.NewUserService(userRepo, logger)
 	authService := application.NewAuthService(userRepo, jwt, logger)
+	oidcService := application.NewOIDCService(authService, jwt, userRepo)
 
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(authService, logger)
 	userHandler := handlers.NewUserHandler(userService, logger)
-	oauthService := application.NewOAuth2Service()
-	oidcHandler := handlers.NewOIDCHandler(
-		authService,
-		oauthService,
-		jwt,
-		logger,
-		userRepo,
-	)
+	oidcHandler := handlers.NewOIDCHandler(oidcService, logger)
 
 	// Swagger documentation
 	router := createRouter()
@@ -59,29 +53,29 @@ func NewRouter(
 	// Public routes
 	router.Group(func(r chi.Router) {
 		r.Post("/register", authHandler.RegisterHandler)
-		r.Post("/login", authHandler.LoginHandler)
+		r.Post("/auth/login", authHandler.LoginHandler)
 	})
 
 	// OIDC routes
 	router.Group(func(r chi.Router) {
-		r.Get("/.well-known/openid-configuration", oidcHandler.HandleOpenIDConfiguration)
-		r.Get("/.well-known/jwks.json", oidcHandler.HandleJWKS)
-		r.Get("/oauth2/authorize", oidcHandler.HandleAuthorize)
-		r.Post("/oauth2/token", oidcHandler.HandleToken)
-		r.Get("/oauth2/userinfo", oidcHandler.HandleUserInfo)
+		r.Get("/.well-known/openid-configuration", oidcHandler.GetOpenIDConfigurationHandler)
+		r.Get("/.well-known/jwks.json", oidcHandler.GetJWKSHandler)
+		r.Get("/oauth2/authorize", oidcHandler.AuthorizeHandler)
+		r.Post("/oauth2/token", oidcHandler.TokenHandler)
+		r.Get("/oauth2/userinfo", oidcHandler.GetUserInfoHandler)
 	})
 
 	// Admin routes
 	router.Group(func(r chi.Router) {
 		r.Use(authMiddleware.Authenticator, authMiddleware.RequireRole("admin"))
-		r.Get("/users", userHandler.HandleListUsers)
+		r.Get("/users", userHandler.ListUsersHandler)
 	})
 
 	// Protected routes
 	router.Group(func(r chi.Router) {
 		r.Use(authMiddleware.Authenticator)
-		r.Get("/users/{id}", userHandler.HandleGetUser)
-		r.Put("/users/{id}", userHandler.HandleUpdateUser)
+		r.Get("/users/{id}", userHandler.GetUserHandler)
+		r.Put("/users/{id}", userHandler.UpdateUserHandler)
 	})
 
 	return &Router{router: router}

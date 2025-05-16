@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/ipede/user-manager-service/internal/application"
 	"github.com/ipede/user-manager-service/internal/interfaces/http/dto"
+	"github.com/ipede/user-manager-service/internal/interfaces/http/errors"
 	"github.com/oklog/ulid/v2"
 	"go.uber.org/zap"
 )
@@ -23,44 +23,43 @@ func NewUserHandler(userService *application.UserService, logger *zap.Logger) *H
 	}
 }
 
-func (h *HandlerUser) HandleGetUser(w http.ResponseWriter, r *http.Request) {
-	userID := chi.URLParam(r, "id")
+func (h *HandlerUser) GetUserHandler(w http.ResponseWriter, r *http.Request) {
+	userID := r.URL.Query().Get("id")
 	if userID == "" {
-		http.Error(w, "user ID is required", http.StatusBadRequest)
+		errors.RespondWithError(w, errors.ErrCodeValidation, "user ID is required", nil, http.StatusBadRequest)
 		return
 	}
 
 	id, err := ulid.Parse(userID)
 	if err != nil {
-		http.Error(w, "invalid user ID", http.StatusBadRequest)
+		errors.RespondWithError(w, errors.ErrCodeValidation, "invalid user ID", nil, http.StatusBadRequest)
 		return
 	}
 
 	user, err := h.userService.GetUser(r.Context(), id)
 	if err != nil {
 		h.logger.Error("failed to get user", zap.Error(err))
-		http.Error(w, "failed to get user", http.StatusInternalServerError)
+		errors.RespondWithError(w, errors.ErrCodeInternal, "failed to get user", nil, http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-
 	response := dto.NewUserResponse(user)
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		h.logger.Error("failed to encode response", zap.Error(err))
-		http.Error(w, "failed to encode response", http.StatusInternalServerError)
+		errors.RespondWithError(w, errors.ErrCodeInternal, "failed to encode response", nil, http.StatusInternalServerError)
 		return
 	}
 }
 
-func (h *HandlerUser) HandleListUsers(w http.ResponseWriter, r *http.Request) {
+func (h *HandlerUser) ListUsersHandler(w http.ResponseWriter, r *http.Request) {
 	limit := 10
 	offset := 0
 
 	users, err := h.userService.ListUsers(r.Context(), limit, offset)
 	if err != nil {
 		h.logger.Error("failed to list users", zap.Error(err))
-		http.Error(w, "failed to list users", http.StatusInternalServerError)
+		errors.RespondWithError(w, errors.ErrCodeInternal, "failed to list users", nil, http.StatusInternalServerError)
 		return
 	}
 
@@ -70,42 +69,42 @@ func (h *HandlerUser) HandleListUsers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		h.logger.Error("failed to encode response", zap.Error(err))
-		http.Error(w, "failed to encode response", http.StatusInternalServerError)
+		errors.RespondWithError(w, errors.ErrCodeInternal, "failed to encode response", nil, http.StatusInternalServerError)
 		return
 	}
 }
 
-func (h *HandlerUser) HandleUpdateUser(w http.ResponseWriter, r *http.Request) {
-	userID := chi.URLParam(r, "id")
+func (h *HandlerUser) UpdateUserHandler(w http.ResponseWriter, r *http.Request) {
+	userID := r.URL.Query().Get("id")
 	if userID == "" {
-		http.Error(w, "user ID is required", http.StatusBadRequest)
+		errors.RespondWithError(w, errors.ErrCodeValidation, "user ID is required", nil, http.StatusBadRequest)
 		return
 	}
 
 	id, err := ulid.Parse(userID)
 	if err != nil {
-		http.Error(w, "invalid user ID", http.StatusBadRequest)
+		errors.RespondWithError(w, errors.ErrCodeValidation, "invalid user ID", nil, http.StatusBadRequest)
 		return
 	}
 
-	var updateUser struct {
+	var req struct {
 		Name  string `json:"name"`
 		Email string `json:"email"`
+		Phone string `json:"phone"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&updateUser); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		errors.RespondWithError(w, errors.ErrCodeInvalidRequest, "invalid request body", nil, http.StatusBadRequest)
 		return
 	}
 
-	if err := h.userService.UpdateUser(r.Context(), id, updateUser.Name, updateUser.Email); err != nil {
+	if err := h.userService.UpdateUser(r.Context(), id, req.Name, req.Email); err != nil {
 		h.logger.Error("failed to update user", zap.Error(err))
-		http.Error(w, "failed to update user", http.StatusInternalServerError)
+		errors.RespondWithError(w, errors.ErrCodeInternal, "failed to update user", nil, http.StatusInternalServerError)
 		return
 	}
 
-	w.WriteHeader(http.StatusNoContent)
+	w.WriteHeader(http.StatusOK)
 }

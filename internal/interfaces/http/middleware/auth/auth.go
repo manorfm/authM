@@ -6,15 +6,16 @@ import (
 	"strings"
 
 	"github.com/ipede/user-manager-service/internal/infrastructure/jwt"
+	httperrors "github.com/ipede/user-manager-service/internal/interfaces/http/errors"
 	"go.uber.org/zap"
 )
 
 type AuthMiddleware struct {
-	jwt    *jwt.JWT
+	jwt    jwt.JWTValidator
 	logger *zap.Logger
 }
 
-func NewAuthMiddleware(jwt *jwt.JWT, logger *zap.Logger) *AuthMiddleware {
+func NewAuthMiddleware(jwt jwt.JWTValidator, logger *zap.Logger) *AuthMiddleware {
 	return &AuthMiddleware{jwt: jwt, logger: logger}
 }
 
@@ -22,13 +23,13 @@ func (m *AuthMiddleware) Authenticator(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := m.extractToken(r)
 		if token == "" {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			httperrors.RespondWithError(w, httperrors.ErrCodeAuthentication, "Unauthorized", nil, http.StatusUnauthorized)
 			return
 		}
 
 		claims, err := m.jwt.ValidateToken(token)
 		if err != nil {
-			http.Error(w, "Invalid token", http.StatusUnauthorized)
+			httperrors.RespondWithError(w, httperrors.ErrCodeAuthentication, "Invalid token", nil, http.StatusUnauthorized)
 			return
 		}
 
@@ -43,7 +44,7 @@ func (m *AuthMiddleware) RequireRole(role string) func(next http.Handler) http.H
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			roles, ok := r.Context().Value("roles").([]string)
 			if !ok {
-				http.Error(w, "Forbidden", http.StatusForbidden)
+				httperrors.RespondWithError(w, httperrors.ErrCodeAuthorization, "Forbidden", nil, http.StatusForbidden)
 				return
 			}
 
@@ -54,7 +55,7 @@ func (m *AuthMiddleware) RequireRole(role string) func(next http.Handler) http.H
 				}
 			}
 
-			http.Error(w, "Forbidden", http.StatusForbidden)
+			httperrors.RespondWithError(w, httperrors.ErrCodeAuthorization, "Forbidden", nil, http.StatusForbidden)
 		})
 	}
 }

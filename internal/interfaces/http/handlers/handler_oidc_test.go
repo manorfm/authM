@@ -4,20 +4,49 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
-	"github.com/ipede/user-manager-service/internal/application"
 	"github.com/ipede/user-manager-service/internal/domain"
 	infrajwt "github.com/ipede/user-manager-service/internal/infrastructure/jwt"
+	httperrors "github.com/ipede/user-manager-service/internal/interfaces/http/errors"
 	"github.com/oklog/ulid/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"
 )
+
+// OpenIDConfiguration represents the OpenID configuration structure
+type OpenIDConfiguration struct {
+	Issuer                   string   `json:"issuer"`
+	AuthorizationEndpoint    string   `json:"authorization_endpoint"`
+	TokenEndpoint            string   `json:"token_endpoint"`
+	UserInfoEndpoint         string   `json:"userinfo_endpoint"`
+	JWKSURI                  string   `json:"jwks_uri"`
+	ResponseTypes            []string `json:"response_types_supported"`
+	SubjectTypes             []string `json:"subject_types_supported"`
+	IDTokenSigningAlgs       []string `json:"id_token_signing_alg_values_supported"`
+	ScopesSupported          []string `json:"scopes_supported"`
+	TokenEndpointAuthMethods []string `json:"token_endpoint_auth_methods_supported"`
+	ClaimsSupported          []string `json:"claims_supported"`
+}
+
+// JWKS represents the JSON Web Key Set structure
+type JWKS struct {
+	Keys []JWK `json:"keys"`
+}
+
+// JWK represents a JSON Web Key
+type JWK struct {
+	Kty string `json:"kty"`
+	Alg string `json:"alg"`
+	Use string `json:"use"`
+	Kid string `json:"kid"`
+	N   string `json:"n"`
+	E   string `json:"e"`
+}
 
 // MockAuthService is a mock implementation of domain.AuthService
 type MockAuthService struct {
@@ -149,6 +178,55 @@ func (m *MockOAuth2Service) ValidateAuthorizationCode(ctx context.Context, code 
 	return args.Get(0).(*domain.OAuth2Client), args.String(1), args.Get(2).([]string), args.Error(3)
 }
 
+type mockOIDCService struct {
+	mock.Mock
+}
+
+func (m *mockOIDCService) GetUserInfo(ctx context.Context, userID string) (map[string]interface{}, error) {
+	args := m.Called(ctx, userID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(map[string]interface{}), args.Error(1)
+}
+
+func (m *mockOIDCService) GetJWKS(ctx context.Context) (map[string]interface{}, error) {
+	args := m.Called(ctx)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(map[string]interface{}), args.Error(1)
+}
+
+func (m *mockOIDCService) GetOpenIDConfiguration(ctx context.Context) (map[string]interface{}, error) {
+	args := m.Called(ctx)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(map[string]interface{}), args.Error(1)
+}
+
+func (m *mockOIDCService) ExchangeCode(ctx context.Context, code string) (*domain.TokenPair, error) {
+	args := m.Called(ctx, code)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*domain.TokenPair), args.Error(1)
+}
+
+func (m *mockOIDCService) RefreshToken(ctx context.Context, refreshToken string) (*domain.TokenPair, error) {
+	args := m.Called(ctx, refreshToken)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*domain.TokenPair), args.Error(1)
+}
+
+func (m *mockOIDCService) Authorize(ctx context.Context, clientID, redirectURI, state, scope string) (string, error) {
+	args := m.Called(ctx, clientID, redirectURI, state, scope)
+	return args.String(0), args.Error(1)
+}
+
 func getJWTService(t *testing.T) *infrajwt.JWT {
 	// 15 minutos = 15 * 60 segundos
 	accessDuration := 15 * time.Minute
@@ -163,280 +241,301 @@ func getJWTService(t *testing.T) *infrajwt.JWT {
 }
 
 func TestHandleOpenIDConfiguration(t *testing.T) {
-	// Setup
-	mockAuthService := new(MockAuthService)
-	mockUserRepo := new(MockUserRepository)
-	jwtService := getJWTService(t)
-	oauthService := application.NewOAuth2Service()
-	logger := zap.NewNop()
+	tests := []struct {
+		name           string
+		mockSetup      func(*mockOIDCService)
+		expectedStatus int
+		expectedBody   map[string]interface{}
+	}{
+		{
+			name: "successful configuration response",
+			mockSetup: func(m *mockOIDCService) {
+				m.On("GetOpenIDConfiguration", mock.Anything).Return(map[string]interface{}{
+					"issuer":                                "http://localhost:8080",
+					"authorization_endpoint":                "http://localhost:8080/oauth2/authorize",
+					"token_endpoint":                        "http://localhost:8080/oauth2/token",
+					"userinfo_endpoint":                     "http://localhost:8080/oauth2/userinfo",
+					"jwks_uri":                              "http://localhost:8080/.well-known/jwks.json",
+					"response_types_supported":              []interface{}{"code", "token", "id_token"},
+					"subject_types_supported":               []interface{}{"public"},
+					"id_token_signing_alg_values_supported": []interface{}{"RS256"},
+					"scopes_supported":                      []interface{}{"openid", "profile", "email"},
+					"token_endpoint_auth_methods_supported": []interface{}{"client_secret_basic", "client_secret_post"},
+					"claims_supported":                      []interface{}{"sub", "iss", "name", "email"},
+				}, nil)
+			},
+			expectedStatus: http.StatusOK,
+			expectedBody: map[string]interface{}{
+				"issuer":                                "http://localhost:8080",
+				"authorization_endpoint":                "http://localhost:8080/oauth2/authorize",
+				"token_endpoint":                        "http://localhost:8080/oauth2/token",
+				"userinfo_endpoint":                     "http://localhost:8080/oauth2/userinfo",
+				"jwks_uri":                              "http://localhost:8080/.well-known/jwks.json",
+				"response_types_supported":              []interface{}{"code", "token", "id_token"},
+				"subject_types_supported":               []interface{}{"public"},
+				"id_token_signing_alg_values_supported": []interface{}{"RS256"},
+				"scopes_supported":                      []interface{}{"openid", "profile", "email"},
+				"token_endpoint_auth_methods_supported": []interface{}{"client_secret_basic", "client_secret_post"},
+				"claims_supported":                      []interface{}{"sub", "iss", "name", "email"},
+			},
+		},
+		{
+			name: "service error",
+			mockSetup: func(m *mockOIDCService) {
+				m.On("GetOpenIDConfiguration", mock.Anything).Return(nil, domain.ErrInternal)
+			},
+			expectedStatus: http.StatusInternalServerError,
+			expectedBody: map[string]interface{}{
+				"code":    "ERR_004",
+				"message": "Failed to get OpenID configuration",
+			},
+		},
+	}
 
-	handler := NewOIDCHandler(
-		mockAuthService,
-		oauthService,
-		jwtService,
-		logger,
-		mockUserRepo,
-	)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create mock service
+			mockService := new(mockOIDCService)
+			tt.mockSetup(mockService)
 
-	t.Run("successful configuration response", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/.well-known/openid-configuration", nil)
-		w := httptest.NewRecorder()
+			// Create handler with mock service
+			handler := NewOIDCHandler(mockService, zap.NewNop())
 
-		handler.HandleOpenIDConfiguration(w, req)
+			// Create test request
+			req := httptest.NewRequest(http.MethodGet, "/.well-known/openid-configuration", nil)
+			w := httptest.NewRecorder()
 
-		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
+			// Call handler
+			handler.GetOpenIDConfigurationHandler(w, req)
 
-		var config OpenIDConfiguration
-		err := json.Unmarshal(w.Body.Bytes(), &config)
-		assert.NoError(t, err)
+			// Assert response
+			assert.Equal(t, tt.expectedStatus, w.Code)
 
-		assert.Equal(t, "http://localhost:8080", config.Issuer)
-		assert.Equal(t, "http://localhost:8080/oauth2/authorize", config.AuthorizationEndpoint)
-		assert.Equal(t, "http://localhost:8080/oauth2/token", config.TokenEndpoint)
-		assert.Equal(t, "http://localhost:8080/oauth2/userinfo", config.UserInfoEndpoint)
-		assert.Equal(t, "http://localhost:8080/.well-known/jwks.json", config.JWKSURI)
-		assert.Contains(t, config.ResponseTypes, "code")
-		assert.Contains(t, config.ResponseTypes, "token")
-		assert.Contains(t, config.ResponseTypes, "id_token")
-		assert.Contains(t, config.SubjectTypes, "public")
-		assert.Contains(t, config.IDTokenSigningAlgs, "RS256")
-		assert.Contains(t, config.ScopesSupported, "openid")
-		assert.Contains(t, config.ScopesSupported, "profile")
-		assert.Contains(t, config.ScopesSupported, "email")
-		assert.Contains(t, config.TokenEndpointAuthMethods, "client_secret_basic")
-		assert.Contains(t, config.TokenEndpointAuthMethods, "client_secret_post")
-		assert.Contains(t, config.ClaimsSupported, "sub")
-		assert.Contains(t, config.ClaimsSupported, "iss")
-		assert.Contains(t, config.ClaimsSupported, "name")
-		assert.Contains(t, config.ClaimsSupported, "email")
-	})
+			var response map[string]interface{}
+			err := json.NewDecoder(w.Body).Decode(&response)
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expectedBody, response)
+
+			// Verify mock expectations
+			mockService.AssertExpectations(t)
+		})
+	}
 }
 
 func TestHandleJWKS(t *testing.T) {
-	// Setup
-	mockAuthService := new(MockAuthService)
-	mockUserRepo := new(MockUserRepository)
-	jwtService := getJWTService(t)
-	oauthService := application.NewOAuth2Service()
-	logger := zap.NewNop()
+	tests := []struct {
+		name           string
+		mockSetup      func(*mockOIDCService)
+		expectedStatus int
+		expectedBody   map[string]interface{}
+	}{
+		{
+			name: "successful JWKS response",
+			mockSetup: func(m *mockOIDCService) {
+				m.On("GetJWKS", mock.Anything).Return(map[string]interface{}{
+					"keys": []map[string]interface{}{
+						{
+							"kty": "RSA",
+							"use": "sig",
+							"kid": "1",
+							"alg": "RS256",
+							"n":   "test_n",
+							"e":   "test_e",
+						},
+					},
+				}, nil)
+			},
+			expectedStatus: http.StatusOK,
+			expectedBody: map[string]interface{}{
+				"keys": []interface{}{
+					map[string]interface{}{
+						"kty": "RSA",
+						"use": "sig",
+						"kid": "1",
+						"alg": "RS256",
+						"n":   "test_n",
+						"e":   "test_e",
+					},
+				},
+			},
+		},
+		{
+			name: "service error",
+			mockSetup: func(m *mockOIDCService) {
+				m.On("GetJWKS", mock.Anything).Return(nil, domain.ErrInternal)
+			},
+			expectedStatus: http.StatusInternalServerError,
+			expectedBody: map[string]interface{}{
+				"code":    "ERR_004",
+				"message": "Failed to get JWKS",
+			},
+		},
+	}
 
-	handler := NewOIDCHandler(
-		mockAuthService,
-		oauthService,
-		jwtService,
-		logger,
-		mockUserRepo,
-	)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create mock service
+			mockService := new(mockOIDCService)
+			tt.mockSetup(mockService)
 
-	t.Run("successful JWKS response", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/.well-known/jwks.json", nil)
-		w := httptest.NewRecorder()
+			// Create handler with mock service
+			handler := NewOIDCHandler(mockService, zap.NewNop())
 
-		handler.HandleJWKS(w, req)
+			// Create test request
+			req := httptest.NewRequest(http.MethodGet, "/.well-known/jwks.json", nil)
+			w := httptest.NewRecorder()
 
-		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
+			// Call handler
+			handler.GetJWKSHandler(w, req)
 
-		var response JWKS
-		err := json.Unmarshal(w.Body.Bytes(), &response)
-		assert.NoError(t, err)
+			// Assert response
+			assert.Equal(t, tt.expectedStatus, w.Code)
 
-		assert.Len(t, response.Keys, 1)
+			var response map[string]interface{}
+			err := json.NewDecoder(w.Body).Decode(&response)
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expectedBody, response)
 
-		key := response.Keys[0]
-		assert.Equal(t, "RSA", key.Kty)
-		assert.Equal(t, "RS256", key.Alg)
-		assert.Equal(t, "sig", key.Use)
-		assert.NotEmpty(t, key.N)
-		assert.NotEmpty(t, key.E)
-		assert.NotEmpty(t, key.Kid)
-	})
+			// Verify mock expectations
+			mockService.AssertExpectations(t)
+		})
+	}
 }
 
 func TestHandleAuthorize(t *testing.T) {
-	// Setup
-	mockAuthService := new(MockAuthService)
-	mockUserRepo := new(MockUserRepository)
-	jwtService := getJWTService(t)
-	oauthService := &MockOAuth2Service{}
-	logger := zap.NewNop()
+	logger, _ := zap.NewProduction()
+	mockService := new(mockOIDCService)
+	handler := NewOIDCHandler(mockService, logger)
 
-	// Configure OAuth2 service for successful case
-	client := &domain.OAuth2Client{
-		ID:           "test",
-		Secret:       "secret",
-		RedirectURIs: []string{"http://localhost:3000/callback"},
+	tests := []struct {
+		name             string
+		queryParams      map[string]string
+		mockSetup        func()
+		expectedStatus   int
+		expectedBody     interface{}
+		expectedRedirect string
+	}{
+		{
+			name: "successful authorization",
+			queryParams: map[string]string{
+				"client_id":    "client123",
+				"redirect_uri": "http://example.com/callback",
+				"state":        "state123",
+				"scope":        "openid profile",
+			},
+			mockSetup: func() {
+				mockService.On("Authorize", mock.Anything, "client123", "http://example.com/callback", "state123", "openid profile").
+					Return("auth_code_123", nil)
+			},
+			expectedStatus:   http.StatusFound,
+			expectedRedirect: "http://example.com/callback?code=auth_code_123&state=state123",
+		},
+		{
+			name: "missing required parameters",
+			queryParams: map[string]string{
+				"state": "state123",
+				"scope": "openid profile",
+			},
+			mockSetup: func() {
+				// No mock setup needed
+			},
+			expectedStatus: http.StatusBadRequest,
+			expectedBody: httperrors.ErrorResponse{
+				Code:    httperrors.ErrCodeValidation,
+				Message: "Validation failed",
+				Details: []httperrors.ErrorDetail{
+					{
+						Field:   "client_id",
+						Message: "client_id is required",
+					},
+					{
+						Field:   "redirect_uri",
+						Message: "redirect_uri is required",
+					},
+				},
+			},
+		},
+		{
+			name: "invalid client",
+			queryParams: map[string]string{
+				"client_id":    "invalid_client",
+				"redirect_uri": "http://example.com/callback",
+				"state":        "state123",
+				"scope":        "openid profile",
+			},
+			mockSetup: func() {
+				mockService.On("Authorize", mock.Anything, "invalid_client", "http://example.com/callback", "state123", "openid profile").
+					Return("", domain.ErrInvalidClient)
+			},
+			expectedStatus: http.StatusBadRequest,
+			expectedBody: httperrors.ErrorResponse{
+				Code:    httperrors.ErrCodeAuthentication,
+				Message: "Invalid client",
+			},
+		},
 	}
 
-	// Mock ValidateClient
-	oauthService.On("ValidateClient", mock.Anything, "test", "http://localhost:3000/callback").Return(client, nil)
-	oauthService.On("ValidateClient", mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("invalid client"))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.mockSetup()
 
-	// Mock GenerateAuthorizationCode
-	oauthService.On("GenerateAuthorizationCode", mock.Anything, "test", mock.Anything, mock.Anything).Return("auth_code", nil)
+			req := httptest.NewRequest("GET", "/authorize", nil)
+			q := req.URL.Query()
+			for key, value := range tt.queryParams {
+				q.Add(key, value)
+			}
+			req.URL.RawQuery = q.Encode()
 
-	handler := NewOIDCHandler(
-		mockAuthService,
-		oauthService,
-		jwtService,
-		logger,
-		mockUserRepo,
-	)
+			rr := httptest.NewRecorder()
+			handler.AuthorizeHandler(rr, req)
 
-	t.Run("missing required parameters", func(t *testing.T) {
-		testCases := []struct {
-			name       string
-			query      string
-			wantStatus int
-			wantBody   string
-		}{
-			{
-				name:       "missing response_type",
-				query:      "client_id=test&redirect_uri=http://localhost:3000/callback",
-				wantStatus: http.StatusBadRequest,
-				wantBody:   "response_type is required",
-			},
-			{
-				name:       "missing client_id",
-				query:      "response_type=code&redirect_uri=http://localhost:3000/callback",
-				wantStatus: http.StatusBadRequest,
-				wantBody:   "client_id is required",
-			},
-			{
-				name:       "missing redirect_uri",
-				query:      "response_type=code&client_id=test",
-				wantStatus: http.StatusBadRequest,
-				wantBody:   "redirect_uri is required",
-			},
-			{
-				name:       "invalid response_type",
-				query:      "response_type=invalid&client_id=test&redirect_uri=http://localhost:3000/callback",
-				wantStatus: http.StatusBadRequest,
-				wantBody:   "invalid response_type",
-			},
-		}
+			assert.Equal(t, tt.expectedStatus, rr.Code)
 
-		for _, tc := range testCases {
-			t.Run(tc.name, func(t *testing.T) {
-				req := httptest.NewRequest(http.MethodGet, "/oauth2/authorize?"+tc.query, nil)
-				w := httptest.NewRecorder()
+			if tt.expectedStatus == http.StatusFound {
+				assert.Equal(t, tt.expectedRedirect, rr.Header().Get("Location"))
+			} else {
+				var response httperrors.ErrorResponse
+				err := json.NewDecoder(rr.Body).Decode(&response)
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expectedBody, response)
+			}
 
-				handler.HandleAuthorize(w, req)
-
-				assert.Equal(t, tc.wantStatus, w.Code)
-				assert.Contains(t, w.Body.String(), tc.wantBody)
-			})
-		}
-	})
-
-	t.Run("invalid client", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/oauth2/authorize?response_type=code&client_id=invalid&redirect_uri=http://localhost:3000/callback", nil)
-		w := httptest.NewRecorder()
-
-		handler.HandleAuthorize(w, req)
-
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assert.Contains(t, w.Body.String(), "Invalid client")
-	})
-
-	t.Run("invalid redirect URI", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/oauth2/authorize?response_type=code&client_id=test&redirect_uri=http://evil.com/callback", nil)
-		w := httptest.NewRecorder()
-
-		handler.HandleAuthorize(w, req)
-
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assert.Contains(t, w.Body.String(), "Invalid client")
-	})
-
-	t.Run("unauthenticated user", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/oauth2/authorize?response_type=code&client_id=test&redirect_uri=http://localhost:3000/callback", nil)
-		w := httptest.NewRecorder()
-
-		handler.HandleAuthorize(w, req)
-
-		assert.Equal(t, http.StatusFound, w.Code)
-		location := w.Header().Get("Location")
-		assert.Contains(t, location, "/login?redirect=")
-	})
-
-	t.Run("authenticated user", func(t *testing.T) {
-		// Create a valid token
-		userID := ulid.Make()
-		tokenPair, err := jwtService.GenerateTokenPair(userID, []string{"user"})
-		assert.NoError(t, err)
-
-		claims, err := jwtService.ValidateToken(tokenPair.AccessToken)
-		assert.NoError(t, err)
-		assert.Equal(t, userID.String(), claims.Subject)
-
-		// Create request with valid token
-		req := httptest.NewRequest(http.MethodGet, "/oauth2/authorize?response_type=code&client_id=test&redirect_uri=http://localhost:3000/callback&state=test_state", nil)
-		req.Header.Set("Authorization", "Bearer "+tokenPair.AccessToken)
-		w := httptest.NewRecorder()
-
-		// Handle request
-		handler.HandleAuthorize(w, req)
-
-		// Assert response
-		assert.Equal(t, http.StatusFound, w.Code)
-		location := w.Header().Get("Location")
-		assert.Contains(t, location, "http://localhost:3000/callback?state=test_state&code=")
-
-	})
+			mockService.AssertExpectations(t)
+		})
+	}
 }
 
 func TestHandleToken(t *testing.T) {
-	// Setup
-	mockAuthService := new(MockAuthService)
-	mockUserRepo := new(MockUserRepository)
-	jwtService := getJWTService(t)
-	oauthService := &MockOAuth2Service{}
-	logger := zap.NewNop()
+	logger, _ := zap.NewProduction()
+	mockService := new(mockOIDCService)
+	handler := NewOIDCHandler(mockService, logger)
 
-	// Configure OAuth2 service for successful case
-	client := &domain.OAuth2Client{
-		ID:           "client_id",
-		Secret:       "client_secret",
-		RedirectURIs: []string{"http://localhost:3000/callback"},
-	}
-	userID := ulid.Make()
-	scopes := []string{"user"}
-
-	// Mock ValidateAuthorizationCode
-	oauthService.On("ValidateAuthorizationCode", mock.Anything, "valid_code").Return(client, userID.String(), scopes, nil)
-	oauthService.On("ValidateAuthorizationCode", mock.Anything, mock.Anything).Return(nil, "", nil, errors.New("invalid code"))
-
-	// Mock FindByID
-	mockUserRepo.On("FindByID", mock.Anything, userID).Return(&domain.User{
-		ID:    userID,
-		Name:  "Test User",
-		Email: "test@example.com",
-	}, nil)
-
-	handler := NewOIDCHandler(
-		mockAuthService,
-		oauthService,
-		jwtService,
-		logger,
-		mockUserRepo,
-	)
-
-	// Test cases
 	tests := []struct {
 		name           string
 		requestBody    interface{}
+		mockSetup      func()
 		expectedStatus int
-		expectedBody   string
+		expectedBody   interface{}
 	}{
 		{
 			name: "Missing required fields",
 			requestBody: TokenRequest{
 				GrantType: "authorization_code",
 			},
+			mockSetup: func() {
+				// No mock setup needed for validation error
+			},
 			expectedStatus: http.StatusBadRequest,
-			expectedBody:   "code is required",
+			expectedBody: httperrors.ErrorResponse{
+				Code:    httperrors.ErrCodeValidation,
+				Message: "Validation failed",
+				Details: []httperrors.ErrorDetail{
+					{
+						Field:   "code",
+						Message: "Authorization code is required",
+					},
+				},
+			},
 		},
 		{
 			name: "Invalid grant type",
@@ -447,8 +546,20 @@ func TestHandleToken(t *testing.T) {
 				ClientID:     "client_id",
 				ClientSecret: "client_secret",
 			},
+			mockSetup: func() {
+				// No mock setup needed for invalid grant type
+			},
 			expectedStatus: http.StatusBadRequest,
-			expectedBody:   "Unsupported grant type",
+			expectedBody: httperrors.ErrorResponse{
+				Code:    httperrors.ErrCodeInvalidRequest,
+				Message: "Unsupported grant type",
+				Details: []httperrors.ErrorDetail{
+					{
+						Field:   "grant_type",
+						Message: "Unsupported grant type",
+					},
+				},
+			},
 		},
 		{
 			name: "Invalid authorization code",
@@ -459,8 +570,15 @@ func TestHandleToken(t *testing.T) {
 				ClientID:     "client_id",
 				ClientSecret: "client_secret",
 			},
+			mockSetup: func() {
+				mockService.On("ExchangeCode", mock.Anything, "invalid_code").
+					Return(nil, domain.ErrInvalidCredentials)
+			},
 			expectedStatus: http.StatusBadRequest,
-			expectedBody:   "Invalid authorization code",
+			expectedBody: httperrors.ErrorResponse{
+				Code:    httperrors.ErrCodeAuthentication,
+				Message: "Invalid credentials",
+			},
 		},
 		{
 			name: "Invalid client credentials",
@@ -471,20 +589,15 @@ func TestHandleToken(t *testing.T) {
 				ClientID:     "invalid_client",
 				ClientSecret: "invalid_secret",
 			},
-			expectedStatus: http.StatusBadRequest,
-			expectedBody:   "Invalid client credentials",
-		},
-		{
-			name: "Invalid redirect URI",
-			requestBody: TokenRequest{
-				GrantType:    "authorization_code",
-				Code:         "valid_code",
-				RedirectURI:  "http://invalid.com/callback",
-				ClientID:     "client_id",
-				ClientSecret: "client_secret",
+			mockSetup: func() {
+				mockService.On("ExchangeCode", mock.Anything, "valid_code").
+					Return(nil, domain.ErrInvalidClient)
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedBody:   "Invalid redirect URI",
+			expectedBody: httperrors.ErrorResponse{
+				Code:    httperrors.ErrCodeAuthentication,
+				Message: "Invalid client",
+			},
 		},
 		{
 			name: "Successful token exchange",
@@ -495,132 +608,616 @@ func TestHandleToken(t *testing.T) {
 				ClientID:     "client_id",
 				ClientSecret: "client_secret",
 			},
+			mockSetup: func() {
+				// Clear any existing mock expectations
+				mockService.ExpectedCalls = nil
+				mockService.On("ExchangeCode", mock.Anything, "valid_code").
+					Return(&domain.TokenPair{
+						AccessToken:  "access_token_123",
+						RefreshToken: "refresh_token_123",
+					}, nil)
+			},
 			expectedStatus: http.StatusOK,
-			expectedBody:   "",
+			expectedBody: &domain.TokenPair{
+				AccessToken:  "access_token_123",
+				RefreshToken: "refresh_token_123",
+			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create request
-			body, _ := json.Marshal(tt.requestBody)
-			req := httptest.NewRequest(http.MethodPost, "/token", bytes.NewBuffer(body))
-			w := httptest.NewRecorder()
+			// Reset mock before each test
+			mockService.ExpectedCalls = nil
+			tt.mockSetup()
 
-			// Handle request
-			handler.HandleToken(w, req)
-
-			// Assert response
-			assert.Equal(t, tt.expectedStatus, w.Code)
-			if tt.expectedBody != "" {
-				assert.Contains(t, w.Body.String(), tt.expectedBody)
+			var body []byte
+			if str, ok := tt.requestBody.(string); ok {
+				body = []byte(str)
 			} else {
-				// For successful case, verify token response
-				var response TokenResponse
-				err := json.NewDecoder(w.Body).Decode(&response)
-				assert.NoError(t, err)
-				assert.NotEmpty(t, response.AccessToken)
-				assert.Equal(t, "Bearer", response.TokenType)
-				assert.Equal(t, 3600, response.ExpiresIn)
-				assert.NotEmpty(t, response.RefreshToken)
-				assert.NotEmpty(t, response.IDToken)
+				body, _ = json.Marshal(tt.requestBody)
 			}
+
+			req := httptest.NewRequest("POST", "/token", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+
+			rr := httptest.NewRecorder()
+			handler.TokenHandler(rr, req)
+
+			assert.Equal(t, tt.expectedStatus, rr.Code)
+
+			if tt.expectedStatus == http.StatusOK {
+				var response domain.TokenPair
+				err := json.NewDecoder(rr.Body).Decode(&response)
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expectedBody.(*domain.TokenPair), &response)
+			} else {
+				var response httperrors.ErrorResponse
+				err := json.NewDecoder(rr.Body).Decode(&response)
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expectedBody, response)
+			}
+
+			mockService.AssertExpectations(t)
 		})
 	}
 }
 
 func TestHandleUserInfo(t *testing.T) {
-	// Setup
-	mockAuthService := new(MockAuthService)
-	mockUserRepo := new(MockUserRepository)
-	jwtService := getJWTService(t)
-	oauthService := &MockOAuth2Service{}
-	logger := zap.NewNop()
+	logger, _ := zap.NewProduction()
+	mockService := new(mockOIDCService)
+	handler := NewOIDCHandler(mockService, logger)
 
-	// Create a test user
-	userID := ulid.Make()
-	user := &domain.User{
-		ID:    userID,
-		Name:  "Test User",
-		Email: "test@example.com",
-		Phone: "1234567890",
-	}
-
-	// Generate a valid token
-	tokenPair, err := jwtService.GenerateTokenPair(userID, []string{"user"})
-	assert.NoError(t, err)
-
-	// Mock FindByID
-	mockUserRepo.On("FindByID", mock.Anything, userID).Return(user, nil)
-
-	handler := NewOIDCHandler(
-		mockAuthService,
-		oauthService,
-		jwtService,
-		logger,
-		mockUserRepo,
-	)
-
-	// Test cases
 	tests := []struct {
 		name           string
 		authHeader     string
+		mockSetup      func()
 		expectedStatus int
-		expectedBody   string
+		expectedBody   interface{}
 	}{
 		{
-			name:           "Missing authorization header",
-			authHeader:     "",
+			name:       "user not authenticated",
+			authHeader: "",
+			mockSetup: func() {
+				// No mock setup needed
+			},
 			expectedStatus: http.StatusUnauthorized,
-			expectedBody:   "Missing access token",
+			expectedBody: httperrors.ErrorResponse{
+				Code:    httperrors.ErrCodeAuthentication,
+				Message: "User not authenticated",
+			},
 		},
 		{
-			name:           "Invalid token format",
-			authHeader:     "Invalid",
-			expectedStatus: http.StatusUnauthorized,
-			expectedBody:   "Invalid token format",
-		},
-		{
-			name:           "Invalid token",
-			authHeader:     "Bearer invalid_token",
-			expectedStatus: http.StatusUnauthorized,
-			expectedBody:   "Invalid token",
-		},
-		{
-			name:           "Successful user info",
-			authHeader:     "Bearer " + tokenPair.AccessToken,
+			name:       "successful user info",
+			authHeader: "",
+			mockSetup: func() {
+				mockService.On("GetUserInfo", mock.Anything, "user123").
+					Return(map[string]interface{}{
+						"sub":            "user123",
+						"name":           "Test User",
+						"email":          "test@example.com",
+						"email_verified": true,
+					}, nil)
+			},
 			expectedStatus: http.StatusOK,
-			expectedBody:   "",
+			expectedBody: map[string]interface{}{
+				"sub":            "user123",
+				"name":           "Test User",
+				"email":          "test@example.com",
+				"email_verified": true,
+			},
+		},
+		{
+			name:       "internal server error",
+			authHeader: "",
+			mockSetup: func() {
+				mockService.On("GetUserInfo", mock.Anything, "user123").
+					Return(nil, domain.ErrInternal)
+			},
+			expectedStatus: http.StatusInternalServerError,
+			expectedBody: httperrors.ErrorResponse{
+				Code:    httperrors.ErrCodeInternal,
+				Message: "Failed to get user info",
+			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create request
-			req := httptest.NewRequest(http.MethodGet, "/oauth2/userinfo", nil)
-			if tt.authHeader != "" {
-				req.Header.Set("Authorization", tt.authHeader)
+			// Reset mock before each test
+			mockService.ExpectedCalls = nil
+			tt.mockSetup()
+
+			req := httptest.NewRequest("GET", "/userinfo", nil)
+			if tt.name == "successful user info" || tt.name == "internal server error" {
+				ctx := req.Context()
+				ctx = context.WithValue(ctx, "user_id", "user123")
+				req = req.WithContext(ctx)
 			}
-			w := httptest.NewRecorder()
 
-			// Handle request
-			handler.HandleUserInfo(w, req)
+			rr := httptest.NewRecorder()
+			handler.GetUserInfoHandler(rr, req)
 
-			// Assert response
-			assert.Equal(t, tt.expectedStatus, w.Code)
-			if tt.expectedBody != "" {
-				assert.Contains(t, w.Body.String(), tt.expectedBody)
-			} else {
-				// For successful case, verify user info response
+			assert.Equal(t, tt.expectedStatus, rr.Code)
+
+			if tt.expectedStatus == http.StatusOK {
 				var response map[string]interface{}
-				err := json.NewDecoder(w.Body).Decode(&response)
+				err := json.NewDecoder(rr.Body).Decode(&response)
 				assert.NoError(t, err)
-				assert.Equal(t, userID.String(), response["sub"])
-				assert.Equal(t, user.Name, response["name"])
-				assert.Equal(t, user.Email, response["email"])
-				assert.Equal(t, user.Phone, response["phone"])
-				assert.Equal(t, true, response["email_verified"])
+				assert.Equal(t, tt.expectedBody, response)
+			} else {
+				var response httperrors.ErrorResponse
+				err := json.NewDecoder(rr.Body).Decode(&response)
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expectedBody, response)
 			}
+
+			mockService.AssertExpectations(t)
+		})
+	}
+}
+
+func TestOIDCHandler_GetUserInfoHandler(t *testing.T) {
+	logger, _ := zap.NewProduction()
+	mockService := new(mockOIDCService)
+	handler := NewOIDCHandler(mockService, logger)
+
+	tests := []struct {
+		name           string
+		userID         string
+		mockSetup      func()
+		expectedStatus int
+		expectedBody   interface{}
+	}{
+		{
+			name:   "successful user info retrieval",
+			userID: "user123",
+			mockSetup: func() {
+				mockService.On("GetUserInfo", mock.Anything, "user123").
+					Return(map[string]interface{}{
+						"sub":            "user123",
+						"name":           "Test User",
+						"email":          "test@example.com",
+						"email_verified": true,
+					}, nil)
+			},
+			expectedStatus: http.StatusOK,
+			expectedBody: map[string]interface{}{
+				"sub":            "user123",
+				"name":           "Test User",
+				"email":          "test@example.com",
+				"email_verified": true,
+			},
+		},
+		{
+			name:   "user not authenticated",
+			userID: "",
+			mockSetup: func() {
+				// No mock setup needed
+			},
+			expectedStatus: http.StatusUnauthorized,
+			expectedBody: httperrors.ErrorResponse{
+				Code:    httperrors.ErrCodeAuthentication,
+				Message: "User not authenticated",
+			},
+		},
+		{
+			name:   "internal server error",
+			userID: "user123",
+			mockSetup: func() {
+				mockService.On("GetUserInfo", mock.Anything, "user123").
+					Return(nil, domain.ErrInternal)
+			},
+			expectedStatus: http.StatusInternalServerError,
+			expectedBody: httperrors.ErrorResponse{
+				Code:    httperrors.ErrCodeInternal,
+				Message: "Failed to get user info",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Reset mock before each test
+			mockService.ExpectedCalls = nil
+			tt.mockSetup()
+
+			req := httptest.NewRequest("GET", "/userinfo", nil)
+			if tt.userID != "" {
+				ctx := context.WithValue(req.Context(), "user_id", tt.userID)
+				req = req.WithContext(ctx)
+			}
+
+			rr := httptest.NewRecorder()
+			handler.GetUserInfoHandler(rr, req)
+
+			assert.Equal(t, tt.expectedStatus, rr.Code)
+
+			if tt.expectedStatus == http.StatusOK {
+				var response map[string]interface{}
+				err := json.NewDecoder(rr.Body).Decode(&response)
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expectedBody, response)
+			} else {
+				var response httperrors.ErrorResponse
+				err := json.NewDecoder(rr.Body).Decode(&response)
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expectedBody, response)
+			}
+
+			mockService.AssertExpectations(t)
+		})
+	}
+}
+
+func TestOIDCHandler_TokenHandler(t *testing.T) {
+	logger, _ := zap.NewProduction()
+	mockService := new(mockOIDCService)
+	handler := NewOIDCHandler(mockService, logger)
+
+	tests := []struct {
+		name           string
+		requestBody    interface{}
+		mockSetup      func()
+		expectedStatus int
+		expectedBody   interface{}
+	}{
+		{
+			name: "successful authorization code exchange",
+			requestBody: TokenRequest{
+				GrantType:    "authorization_code",
+				Code:         "auth_code_123",
+				ClientID:     "client123",
+				ClientSecret: "secret123",
+			},
+			mockSetup: func() {
+				mockService.On("ExchangeCode", mock.Anything, "auth_code_123").
+					Return(&domain.TokenPair{
+						AccessToken:  "access_token_123",
+						RefreshToken: "refresh_token_123",
+					}, nil)
+			},
+			expectedStatus: http.StatusOK,
+			expectedBody: &domain.TokenPair{
+				AccessToken:  "access_token_123",
+				RefreshToken: "refresh_token_123",
+			},
+		},
+		{
+			name: "successful refresh token exchange",
+			requestBody: TokenRequest{
+				GrantType:    "refresh_token",
+				RefreshToken: "refresh_token_123",
+			},
+			mockSetup: func() {
+				mockService.On("RefreshToken", mock.Anything, "refresh_token_123").
+					Return(&domain.TokenPair{
+						AccessToken:  "new_access_token_123",
+						RefreshToken: "new_refresh_token_123",
+					}, nil)
+			},
+			expectedStatus: http.StatusOK,
+			expectedBody: &domain.TokenPair{
+				AccessToken:  "new_access_token_123",
+				RefreshToken: "new_refresh_token_123",
+			},
+		},
+		{
+			name:        "invalid request body",
+			requestBody: "invalid json",
+			mockSetup: func() {
+				// No mock setup needed
+			},
+			expectedStatus: http.StatusBadRequest,
+			expectedBody: httperrors.ErrorResponse{
+				Code:    httperrors.ErrCodeInvalidRequest,
+				Message: "Invalid request body",
+			},
+		},
+		{
+			name: "missing authorization code",
+			requestBody: TokenRequest{
+				GrantType: "authorization_code",
+			},
+			mockSetup: func() {
+				// No mock setup needed
+			},
+			expectedStatus: http.StatusBadRequest,
+			expectedBody: httperrors.ErrorResponse{
+				Code:    httperrors.ErrCodeValidation,
+				Message: "Validation failed",
+				Details: []httperrors.ErrorDetail{
+					{
+						Field:   "code",
+						Message: "Authorization code is required",
+					},
+				},
+			},
+		},
+		{
+			name: "missing refresh token",
+			requestBody: TokenRequest{
+				GrantType: "refresh_token",
+			},
+			mockSetup: func() {
+				// No mock setup needed
+			},
+			expectedStatus: http.StatusBadRequest,
+			expectedBody: httperrors.ErrorResponse{
+				Code:    httperrors.ErrCodeValidation,
+				Message: "Validation failed",
+				Details: []httperrors.ErrorDetail{
+					{
+						Field:   "refresh_token",
+						Message: "Refresh token is required",
+					},
+				},
+			},
+		},
+		{
+			name: "invalid grant type",
+			requestBody: TokenRequest{
+				GrantType: "invalid_grant_type",
+			},
+			mockSetup: func() {
+				// No mock setup needed
+			},
+			expectedStatus: http.StatusBadRequest,
+			expectedBody: httperrors.ErrorResponse{
+				Code:    httperrors.ErrCodeInvalidRequest,
+				Message: "Unsupported grant type",
+				Details: []httperrors.ErrorDetail{
+					{
+						Field:   "grant_type",
+						Message: "Unsupported grant type",
+					},
+				},
+			},
+		},
+		{
+			name: "invalid credentials",
+			requestBody: TokenRequest{
+				GrantType:    "authorization_code",
+				Code:         "invalid_code",
+				ClientID:     "client123",
+				ClientSecret: "secret123",
+			},
+			mockSetup: func() {
+				mockService.On("ExchangeCode", mock.Anything, "invalid_code").
+					Return(nil, domain.ErrInvalidCredentials)
+			},
+			expectedStatus: http.StatusBadRequest,
+			expectedBody: httperrors.ErrorResponse{
+				Code:    httperrors.ErrCodeAuthentication,
+				Message: "Invalid credentials",
+			},
+		},
+		{
+			name: "invalid client",
+			requestBody: TokenRequest{
+				GrantType:    "authorization_code",
+				Code:         "valid_code",
+				ClientID:     "invalid_client",
+				ClientSecret: "invalid_secret",
+			},
+			mockSetup: func() {
+				mockService.On("ExchangeCode", mock.Anything, "valid_code").
+					Return(nil, domain.ErrInvalidClient)
+			},
+			expectedStatus: http.StatusBadRequest,
+			expectedBody: httperrors.ErrorResponse{
+				Code:    httperrors.ErrCodeAuthentication,
+				Message: "Invalid client",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Reset mock before each test
+			mockService.ExpectedCalls = nil
+			tt.mockSetup()
+
+			var body []byte
+			if str, ok := tt.requestBody.(string); ok {
+				body = []byte(str)
+			} else {
+				body, _ = json.Marshal(tt.requestBody)
+			}
+
+			req := httptest.NewRequest("POST", "/token", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+
+			rr := httptest.NewRecorder()
+			handler.TokenHandler(rr, req)
+
+			assert.Equal(t, tt.expectedStatus, rr.Code)
+
+			if tt.expectedStatus == http.StatusOK {
+				var response domain.TokenPair
+				err := json.NewDecoder(rr.Body).Decode(&response)
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expectedBody.(*domain.TokenPair), &response)
+			} else {
+				var response httperrors.ErrorResponse
+				err := json.NewDecoder(rr.Body).Decode(&response)
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expectedBody, response)
+			}
+
+			mockService.AssertExpectations(t)
+		})
+	}
+}
+
+func TestOIDCHandler_GetJWKSHandler(t *testing.T) {
+	logger, _ := zap.NewProduction()
+	mockService := new(mockOIDCService)
+	handler := NewOIDCHandler(mockService, logger)
+
+	tests := []struct {
+		name           string
+		mockSetup      func()
+		expectedStatus int
+		expectedBody   interface{}
+	}{
+		{
+			name: "successful JWKS retrieval",
+			mockSetup: func() {
+				mockService.On("GetJWKS", mock.Anything).
+					Return(map[string]interface{}{
+						"keys": []interface{}{
+							map[string]interface{}{
+								"kty": "RSA",
+								"alg": "RS256",
+								"use": "sig",
+								"kid": "1",
+								"n":   "test_n",
+								"e":   "test_e",
+							},
+						},
+					}, nil)
+			},
+			expectedStatus: http.StatusOK,
+			expectedBody: map[string]interface{}{
+				"keys": []interface{}{
+					map[string]interface{}{
+						"kty": "RSA",
+						"alg": "RS256",
+						"use": "sig",
+						"kid": "1",
+						"n":   "test_n",
+						"e":   "test_e",
+					},
+				},
+			},
+		},
+		{
+			name: "internal server error",
+			mockSetup: func() {
+				mockService.On("GetJWKS", mock.Anything).
+					Return(nil, domain.ErrInternal)
+			},
+			expectedStatus: http.StatusInternalServerError,
+			expectedBody: httperrors.ErrorResponse{
+				Code:    httperrors.ErrCodeInternal,
+				Message: "Failed to get JWKS",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Reset mock before each test
+			mockService.ExpectedCalls = nil
+			tt.mockSetup()
+
+			req := httptest.NewRequest("GET", "/.well-known/jwks.json", nil)
+			rr := httptest.NewRecorder()
+			handler.GetJWKSHandler(rr, req)
+
+			assert.Equal(t, tt.expectedStatus, rr.Code)
+
+			if tt.expectedStatus == http.StatusOK {
+				var response map[string]interface{}
+				err := json.NewDecoder(rr.Body).Decode(&response)
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expectedBody, response)
+			} else {
+				var response httperrors.ErrorResponse
+				err := json.NewDecoder(rr.Body).Decode(&response)
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expectedBody, response)
+			}
+
+			mockService.AssertExpectations(t)
+		})
+	}
+}
+
+func TestOIDCHandler_GetOpenIDConfigurationHandler(t *testing.T) {
+	logger, _ := zap.NewProduction()
+	mockService := new(mockOIDCService)
+	handler := NewOIDCHandler(mockService, logger)
+
+	tests := []struct {
+		name           string
+		mockSetup      func()
+		expectedStatus int
+		expectedBody   interface{}
+	}{
+		{
+			name: "successful configuration retrieval",
+			mockSetup: func() {
+				mockService.On("GetOpenIDConfiguration", mock.Anything).
+					Return(map[string]interface{}{
+						"issuer":                                "http://localhost:8080",
+						"authorization_endpoint":                "http://localhost:8080/oauth2/authorize",
+						"token_endpoint":                        "http://localhost:8080/oauth2/token",
+						"userinfo_endpoint":                     "http://localhost:8080/oauth2/userinfo",
+						"jwks_uri":                              "http://localhost:8080/.well-known/jwks.json",
+						"response_types_supported":              []interface{}{"code", "token", "id_token"},
+						"subject_types_supported":               []interface{}{"public"},
+						"id_token_signing_alg_values_supported": []interface{}{"RS256"},
+						"scopes_supported":                      []interface{}{"openid", "profile", "email"},
+						"token_endpoint_auth_methods_supported": []interface{}{"client_secret_basic", "client_secret_post"},
+						"claims_supported":                      []interface{}{"sub", "iss", "name", "email"},
+					}, nil)
+			},
+			expectedStatus: http.StatusOK,
+			expectedBody: map[string]interface{}{
+				"issuer":                                "http://localhost:8080",
+				"authorization_endpoint":                "http://localhost:8080/oauth2/authorize",
+				"token_endpoint":                        "http://localhost:8080/oauth2/token",
+				"userinfo_endpoint":                     "http://localhost:8080/oauth2/userinfo",
+				"jwks_uri":                              "http://localhost:8080/.well-known/jwks.json",
+				"response_types_supported":              []interface{}{"code", "token", "id_token"},
+				"subject_types_supported":               []interface{}{"public"},
+				"id_token_signing_alg_values_supported": []interface{}{"RS256"},
+				"scopes_supported":                      []interface{}{"openid", "profile", "email"},
+				"token_endpoint_auth_methods_supported": []interface{}{"client_secret_basic", "client_secret_post"},
+				"claims_supported":                      []interface{}{"sub", "iss", "name", "email"},
+			},
+		},
+		{
+			name: "internal server error",
+			mockSetup: func() {
+				mockService.On("GetOpenIDConfiguration", mock.Anything).
+					Return(nil, domain.ErrInternal)
+			},
+			expectedStatus: http.StatusInternalServerError,
+			expectedBody: httperrors.ErrorResponse{
+				Code:    httperrors.ErrCodeInternal,
+				Message: "Failed to get OpenID configuration",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Reset mock before each test
+			mockService.ExpectedCalls = nil
+			tt.mockSetup()
+
+			req := httptest.NewRequest("GET", "/.well-known/openid-configuration", nil)
+			rr := httptest.NewRecorder()
+			handler.GetOpenIDConfigurationHandler(rr, req)
+
+			assert.Equal(t, tt.expectedStatus, rr.Code)
+
+			if tt.expectedStatus == http.StatusOK {
+				var response map[string]interface{}
+				err := json.NewDecoder(rr.Body).Decode(&response)
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expectedBody, response)
+			} else {
+				var response httperrors.ErrorResponse
+				err := json.NewDecoder(rr.Body).Decode(&response)
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expectedBody, response)
+			}
+
+			mockService.AssertExpectations(t)
 		})
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/ipede/user-manager-service/internal/domain"
+	"github.com/ipede/user-manager-service/internal/interfaces/http/errors"
 	"go.uber.org/zap"
 )
 
@@ -43,23 +44,47 @@ func (h *HandlerAuth) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		errors.RespondWithError(w, errors.ErrCodeInvalidRequest, "Invalid request body", nil, http.StatusBadRequest)
 		return
 	}
 
-	_, err := h.authService.Register(r.Context(), req.Name, req.Email, req.Password, req.Phone)
+	var validationErrors errors.ValidationErrors
+	if req.Email == "" {
+		validationErrors.Add("email", "Email is required")
+	}
+	if req.Password == "" {
+		validationErrors.Add("password", "Password is required")
+	}
+	if req.Name == "" {
+		validationErrors.Add("name", "Name is required")
+	}
+	if req.Phone == "" {
+		validationErrors.Add("phone", "Phone is required")
+	}
+
+	if validationErrors.HasErrors() {
+		errors.RespondWithError(w, errors.ErrCodeValidation, "Validation error", validationErrors.ToErrorDetails(), http.StatusBadRequest)
+		return
+	}
+
+	user, err := h.authService.Register(r.Context(), req.Name, req.Email, req.Password, req.Phone)
 	if err != nil {
 		h.logger.Error("failed to register user", zap.Error(err))
 		if err == domain.ErrInvalidCredentials {
-			http.Error(w, "invalid credentials", http.StatusBadRequest)
+			errors.RespondWithError(w, errors.ErrCodeAuthentication, "Invalid credentials", nil, http.StatusBadRequest)
 			return
 		}
-		http.Error(w, "failed to register user", http.StatusInternalServerError)
+		if err == domain.ErrUserAlreadyExists {
+			errors.RespondWithError(w, errors.ErrCodeConflict, "User already exists", nil, http.StatusConflict)
+			return
+		}
+		errors.RespondWithError(w, errors.ErrCodeInternal, "Failed to register user", nil, http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(user)
 }
 
 func (h *HandlerAuth) LoginHandler(w http.ResponseWriter, r *http.Request) {
@@ -69,7 +94,20 @@ func (h *HandlerAuth) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		errors.RespondWithError(w, errors.ErrCodeInvalidRequest, "Invalid request body", nil, http.StatusBadRequest)
+		return
+	}
+
+	var validationErrors errors.ValidationErrors
+	if req.Email == "" {
+		validationErrors.Add("email", "email is required")
+	}
+	if req.Password == "" {
+		validationErrors.Add("password", "password is required")
+	}
+
+	if validationErrors.HasErrors() {
+		errors.RespondWithError(w, errors.ErrCodeValidation, "Validation failed", validationErrors.ToErrorDetails(), http.StatusBadRequest)
 		return
 	}
 
@@ -77,18 +115,17 @@ func (h *HandlerAuth) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.logger.Error("failed to login user", zap.Error(err))
 		if err == domain.ErrInvalidCredentials {
-			http.Error(w, "invalid credentials", http.StatusBadRequest)
+			errors.RespondWithError(w, errors.ErrCodeAuthentication, "Invalid credentials", nil, http.StatusBadRequest)
 			return
 		}
-		http.Error(w, "failed to login user", http.StatusInternalServerError)
+		errors.RespondWithError(w, errors.ErrCodeInternal, "Failed to login user", nil, http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-
 	if err := json.NewEncoder(w).Encode(tokenPair); err != nil {
 		h.logger.Error("failed to encode response", zap.Error(err))
-		http.Error(w, "failed to encode response", http.StatusInternalServerError)
+		errors.RespondWithError(w, errors.ErrCodeInternal, "Failed to encode response", nil, http.StatusInternalServerError)
 		return
 	}
 }
