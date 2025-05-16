@@ -77,7 +77,10 @@ func TestAuthService_Register(t *testing.T) {
 
 	t.Run("successful registration", func(t *testing.T) {
 		repo := new(MockUserRepository)
-		jwtService := jwt.New("test-secret", time.Hour, time.Hour*24)
+		jwtService, err := jwt.New(time.Hour, time.Hour*24)
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
 		service := NewAuthService(repo, jwtService, logger)
 
 		repo.On("ExistsByEmail", ctx, "test@example.com").Return(false, nil)
@@ -97,7 +100,10 @@ func TestAuthService_Register(t *testing.T) {
 
 	t.Run("user already exists", func(t *testing.T) {
 		repo := new(MockUserRepository)
-		jwtService := jwt.New("test-secret", time.Hour, time.Hour*24)
+		jwtService, err := jwt.New(time.Hour, time.Hour*24)
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
 		service := NewAuthService(repo, jwtService, logger)
 
 		repo.On("ExistsByEmail", ctx, "test@example.com").Return(true, nil)
@@ -110,7 +116,10 @@ func TestAuthService_Register(t *testing.T) {
 
 	t.Run("repository error on exists check", func(t *testing.T) {
 		repo := new(MockUserRepository)
-		jwtService := jwt.New("test-secret", time.Hour, time.Hour*24)
+		jwtService, err := jwt.New(time.Hour, time.Hour*24)
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
 		service := NewAuthService(repo, jwtService, logger)
 
 		repo.On("ExistsByEmail", ctx, "test@example.com").Return(false, assert.AnError)
@@ -123,7 +132,10 @@ func TestAuthService_Register(t *testing.T) {
 
 	t.Run("repository error on create", func(t *testing.T) {
 		repo := new(MockUserRepository)
-		jwtService := jwt.New("test-secret", time.Hour, time.Hour*24)
+		jwtService, err := jwt.New(time.Hour, time.Hour*24)
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
 		service := NewAuthService(repo, jwtService, logger)
 
 		repo.On("ExistsByEmail", ctx, "test@example.com").Return(false, nil)
@@ -188,7 +200,10 @@ func TestAuthService_Login(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockRepo := new(MockUserRepository)
-			jwtService := jwt.New("test-secret", time.Hour, time.Hour*24)
+			jwtService, err := jwt.New(time.Hour, time.Hour*24)
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
 			logger := zap.NewNop()
 
 			service := NewAuthService(mockRepo, jwtService, logger)

@@ -33,7 +33,14 @@ func NewRouter(
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(authService, logger)
 	userHandler := handlers.NewUserHandler(userService, logger)
-	oidcHandler := handlers.NewOIDCHandler(authService, logger)
+	oauthService := application.NewOAuth2Service()
+	oidcHandler := handlers.NewOIDCHandler(
+		authService,
+		oauthService,
+		jwt,
+		logger,
+		userRepo,
+	)
 
 	// Swagger documentation
 	router := createRouter()

@@ -49,11 +49,13 @@ func main() {
 	defer db.Close()
 
 	// Initialize services
-	jwtService := jwt.New(
-		cfg.JWTSecret,
+	jwtService, err := jwt.New(
 		cfg.JWTAccessDuration,
 		cfg.JWTRefreshDuration,
 	)
+	if err != nil {
+		logger.Fatal("Failed to initialize JWT service", zap.Error(err))
+	}
 
 	// Create router
 	router := httprouter.NewRouter(db, jwtService, logger)
