@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
@@ -20,6 +21,7 @@ func main() {
 	up := flag.Bool("up", false, "Run migrations up")
 	down := flag.Bool("down", false, "Run migrations down")
 	steps := flag.Int("steps", 0, "Number of steps to migrate (positive for up, negative for down)")
+	force := flag.String("force", "", "Force migration to specific version")
 	flag.Parse()
 
 	// Load configuration
@@ -75,7 +77,24 @@ func main() {
 	)
 
 	// Run migrations based on flags
-	if *up {
+	if *force != "" {
+		version, err := strconv.ParseUint(*force, 10, 64)
+		if err != nil {
+			logger.Fatal("Invalid version number", zap.Error(err))
+		}
+		if version == 0 {
+			// Para versão 0, primeiro tentamos dropar todas as tabelas
+			if err := m.Drop(); err != nil {
+				logger.Fatal("Failed to drop database schema", zap.Error(err))
+			}
+			logger.Info("Dropped all tables and reset migration state")
+		} else {
+			if err := m.Force(int(version)); err != nil {
+				logger.Fatal("Failed to force migration version", zap.Error(err))
+			}
+			logger.Info("Forced migration version", zap.Uint64("version", version))
+		}
+	} else if *up {
 		logger.Info("Running migrations up")
 		if err := m.Up(); err != nil {
 			if err == migrate.ErrNoChange {

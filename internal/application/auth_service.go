@@ -50,6 +50,7 @@ func (s *AuthService) Register(ctx context.Context, name, email, passwordStr, ph
 		Email:     email,
 		Password:  hashedPassword,
 		Phone:     phone,
+		Roles:     []string{"ADMIN"},
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
@@ -66,10 +67,7 @@ func (s *AuthService) Register(ctx context.Context, name, email, passwordStr, ph
 func (s *AuthService) Login(ctx context.Context, email, passwordStr string) (*domain.TokenPair, error) {
 	user, err := s.userRepo.FindByEmail(ctx, email)
 	if err != nil {
-		if err == domain.ErrUserNotFound {
-			return nil, domain.ErrInvalidCredentials
-		}
-		return nil, fmt.Errorf("failed to find user: %w", err)
+		return nil, domain.ErrUserNotFound
 	}
 
 	err = password.CheckPassword(passwordStr, user.Password)

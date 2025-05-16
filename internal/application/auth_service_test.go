@@ -174,7 +174,7 @@ func TestAuthService_Login(t *testing.T) {
 			email:       "test@example.com",
 			password:    "password123",
 			mockError:   domain.ErrUserNotFound,
-			expectedErr: domain.ErrInvalidCredentials,
+			expectedErr: domain.ErrUserNotFound,
 		},
 		{
 			name:     "invalid credentials - wrong password",

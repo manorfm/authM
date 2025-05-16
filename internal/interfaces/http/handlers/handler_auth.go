@@ -118,6 +118,10 @@ func (h *HandlerAuth) LoginHandler(w http.ResponseWriter, r *http.Request) {
 			errors.RespondWithError(w, errors.ErrCodeAuthentication, "Invalid credentials", nil, http.StatusBadRequest)
 			return
 		}
+		if err == domain.ErrUserNotFound {
+			errors.RespondWithError(w, errors.ErrCodeNotFound, "User not found", nil, http.StatusNotFound)
+			return
+		}
 		errors.RespondWithError(w, errors.ErrCodeInternal, "Failed to login user", nil, http.StatusInternalServerError)
 		return
 	}
