@@ -9,6 +9,15 @@ var (
 	// ErrInvalidClient is returned when the client is invalid
 	ErrInvalidClient = errors.New("invalid client")
 
+	// ErrInvalidAuthorizationCode is returned when the authorization code is invalid
+	ErrInvalidAuthorizationCode = errors.New("invalid authorization code")
+
+	// ErrAuthorizationCodeExpired is returned when the authorization code is expired
+	ErrAuthorizationCodeExpired = errors.New("authorization code expired")
+
+	// ErrInvalidUserID is returned when the user ID is invalid
+	ErrInvalidUserID = errors.New("invalid user ID")
+
 	// ErrInternal is returned when there is an internal server error
 	ErrInternal = errors.New("internal server error")
 

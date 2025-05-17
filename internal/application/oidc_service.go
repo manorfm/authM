@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
@@ -114,16 +115,15 @@ func (s *OIDCService) ExchangeCode(ctx context.Context, code string) (*domain.To
 	// Get authorization code from repository
 	authCode, err := s.oauthRepo.GetAuthorizationCode(ctx, code)
 	if err != nil {
-		s.logger.Error("Failed to get authorization code",
-			zap.Error(err))
-		return nil, fmt.Errorf("invalid authorization code: %w", err)
+		s.logger.Error("Failed to get authorization code", zap.Error(err))
+		return nil, domain.ErrInvalidAuthorizationCode
 	}
 
 	// Check if code is expired
 	if authCode.ExpiresAt.Before(time.Now()) {
 		s.logger.Error("Authorization code expired",
 			zap.Time("expires_at", authCode.ExpiresAt))
-		return nil, fmt.Errorf("authorization code expired")
+		return nil, domain.ErrAuthorizationCodeExpired
 	}
 
 	// Get user from repository
@@ -132,7 +132,7 @@ func (s *OIDCService) ExchangeCode(ctx context.Context, code string) (*domain.To
 		s.logger.Error("Failed to parse user ID",
 			zap.String("user_id", authCode.UserID),
 			zap.Error(err))
-		return nil, fmt.Errorf("invalid user ID: %w", err)
+		return nil, domain.ErrInvalidUserID
 	}
 
 	user, err := s.userRepo.FindByID(ctx, userID)
@@ -264,8 +264,16 @@ func (s *OIDCService) Authorize(ctx context.Context, clientID, redirectURI, stat
 		return "", domain.ErrInvalidCredentials
 	}
 
-	// Generate authorization code
-	code := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+	// Generate random bytes for the authorization code
+	randomBytes := make([]byte, 32)
+	if _, err := rand.Read(randomBytes); err != nil {
+		s.logger.Error("Failed to generate random bytes for authorization code", zap.Error(err))
+		return "", fmt.Errorf("failed to generate authorization code: %w", err)
+	}
+
+	// Encode random bytes to base64
+	code := base64.RawURLEncoding.EncodeToString(randomBytes)
+
 	authCode := &domain.AuthorizationCode{
 		Code:      code,
 		ClientID:  clientID,
@@ -277,8 +285,7 @@ func (s *OIDCService) Authorize(ctx context.Context, clientID, redirectURI, stat
 
 	// Store authorization code
 	if err := s.oauthRepo.CreateAuthorizationCode(ctx, authCode); err != nil {
-		s.logger.Error("Failed to create authorization code",
-			zap.Error(err))
+		s.logger.Error("Failed to create authorization code", zap.Error(err))
 		return "", fmt.Errorf("failed to create authorization code: %w", err)
 	}
 

@@ -107,8 +107,7 @@ func (h *OIDCHandler) TokenHandler(w http.ResponseWriter, r *http.Request) {
 	var req TokenRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.logger.Error("Failed to decode request body",
-			zap.Error(err))
+		h.logger.Error("Failed to decode request body", zap.Error(err))
 		httperrors.RespondWithError(w, httperrors.ErrCodeInvalidRequest, "Invalid request body", nil, http.StatusBadRequest)
 		return
 	}
@@ -158,6 +157,8 @@ func (h *OIDCHandler) TokenHandler(w http.ResponseWriter, r *http.Request) {
 				httperrors.RespondWithError(w, httperrors.ErrCodeAuthentication, "Invalid credentials", nil, http.StatusBadRequest)
 			case domain.ErrInvalidClient:
 				httperrors.RespondWithError(w, httperrors.ErrCodeAuthentication, "Invalid client", nil, http.StatusBadRequest)
+			case domain.ErrInvalidAuthorizationCode:
+				httperrors.RespondWithError(w, httperrors.ErrCodeInvalidRequest, "Invalid authorization code", nil, http.StatusBadRequest)
 			default:
 				httperrors.RespondWithError(w, httperrors.ErrCodeInternal, "Token exchange failed", nil, http.StatusInternalServerError)
 			}
@@ -240,8 +241,7 @@ func (h *OIDCHandler) AuthorizeHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Validate response_type
 	if responseType != "code" {
-		h.logger.Error("Unsupported response type",
-			zap.String("response_type", responseType))
+		h.logger.Error("Unsupported response type", zap.String("response_type", responseType))
 		httperrors.RespondWithError(w, httperrors.ErrCodeInvalidRequest, "Unsupported response type", nil, http.StatusBadRequest)
 		return
 	}

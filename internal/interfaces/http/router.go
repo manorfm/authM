@@ -77,6 +77,14 @@ func NewRouter(
 		r.Get("/oauth2/authorize", oidcHandler.AuthorizeHandler)
 		r.Post("/oauth2/token", oidcHandler.TokenHandler)
 		r.Get("/oauth2/userinfo", oidcHandler.GetUserInfoHandler)
+
+		// OAuth2 client management routes
+		oauth2Handler := handlers.NewOAuth2Handler(oauthRepo, logger)
+		r.Post("/oauth2/clients", oauth2Handler.CreateClientHandler)
+		r.Get("/oauth2/clients", oauth2Handler.ListClientsHandler)
+		r.Get("/oauth2/clients/{id}", oauth2Handler.GetClientHandler)
+		r.Put("/oauth2/clients/{id}", oauth2Handler.UpdateClientHandler)
+		r.Delete("/oauth2/clients/{id}", oauth2Handler.DeleteClientHandler)
 	})
 
 	return &Router{router: router}
