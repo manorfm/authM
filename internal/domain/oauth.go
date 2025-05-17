@@ -18,12 +18,15 @@ type OAuth2Client struct {
 
 // AuthorizationCode represents an OAuth2 authorization code
 type AuthorizationCode struct {
-	Code      string    `json:"code"`
-	ClientID  string    `json:"client_id"`
-	UserID    string    `json:"user_id"`
-	Scopes    []string  `json:"scopes"`
-	ExpiresAt time.Time `json:"expires_at"`
-	CreatedAt time.Time `json:"created_at"`
+	Code                string    `json:"code"`
+	ClientID            string    `json:"client_id"`
+	UserID              string    `json:"user_id"`
+	Scopes              []string  `json:"scopes"`
+	ExpiresAt           time.Time `json:"expires_at"`
+	CreatedAt           time.Time `json:"created_at"`
+	CodeVerifier        string    `json:"code_verifier"`
+	CodeChallenge       string    `json:"code_challenge"`
+	CodeChallengeMethod string    `json:"code_challenge_method"`
 }
 
 // OAuth2Service defines the interface for OAuth2 operations

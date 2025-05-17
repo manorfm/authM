@@ -1,6 +1,13 @@
 package domain
 
-import "context"
+import (
+	"context"
+	"errors"
+)
+
+var (
+	ErrInvalidPKCE = errors.New("invalid PKCE")
+)
 
 // OIDCService defines the interface for OpenID Connect operations
 type OIDCService interface {
@@ -14,7 +21,7 @@ type OIDCService interface {
 	GetOpenIDConfiguration(ctx context.Context) (map[string]interface{}, error)
 
 	// ExchangeCode exchanges an authorization code for tokens
-	ExchangeCode(ctx context.Context, code string) (*TokenPair, error)
+	ExchangeCode(ctx context.Context, code string, codeVerifier string) (*TokenPair, error)
 
 	// RefreshToken refreshes an access token using a refresh token
 	RefreshToken(ctx context.Context, refreshToken string) (*TokenPair, error)

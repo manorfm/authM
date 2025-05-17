@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -108,9 +109,10 @@ func (s *OIDCService) GetOpenIDConfiguration(ctx context.Context) (map[string]in
 	}, nil
 }
 
-func (s *OIDCService) ExchangeCode(ctx context.Context, code string) (*domain.TokenPair, error) {
+func (s *OIDCService) ExchangeCode(ctx context.Context, code string, codeVerifier string) (*domain.TokenPair, error) {
 	s.logger.Debug("Exchanging authorization code for tokens",
-		zap.String("code", code))
+		zap.String("code", code),
+		zap.String("code_verifier", codeVerifier))
 
 	// Get authorization code from repository
 	authCode, err := s.oauthRepo.GetAuthorizationCode(ctx, code)
@@ -124,6 +126,38 @@ func (s *OIDCService) ExchangeCode(ctx context.Context, code string) (*domain.To
 		s.logger.Error("Authorization code expired",
 			zap.Time("expires_at", authCode.ExpiresAt))
 		return nil, domain.ErrAuthorizationCodeExpired
+	}
+
+	// Validate PKCE
+	if authCode.CodeChallenge != "" {
+		if codeVerifier == "" {
+			s.logger.Error("PKCE code verifier is required")
+			return nil, domain.ErrInvalidPKCE
+		}
+
+		// Calculate code challenge from verifier
+		var calculatedChallenge string
+		switch authCode.CodeChallengeMethod {
+		case "S256":
+			// For S256, we need to hash the verifier with SHA-256 and base64url encode it
+			h := sha256.New()
+			h.Write([]byte(codeVerifier))
+			calculatedChallenge = base64.RawURLEncoding.EncodeToString(h.Sum(nil))
+		case "plain":
+			calculatedChallenge = codeVerifier
+		default:
+			s.logger.Error("Unsupported PKCE challenge method",
+				zap.String("method", authCode.CodeChallengeMethod))
+			return nil, domain.ErrInvalidPKCE
+		}
+
+		// Compare calculated challenge with stored challenge
+		if calculatedChallenge != authCode.CodeChallenge {
+			s.logger.Error("PKCE validation failed",
+				zap.String("calculated", calculatedChallenge),
+				zap.String("stored", authCode.CodeChallenge))
+			return nil, domain.ErrInvalidPKCE
+		}
 	}
 
 	// Get user from repository
@@ -264,6 +298,10 @@ func (s *OIDCService) Authorize(ctx context.Context, clientID, redirectURI, stat
 		return "", domain.ErrInvalidCredentials
 	}
 
+	// Get PKCE parameters from context
+	codeChallenge := ctx.Value("code_challenge").(string)
+	codeChallengeMethod := ctx.Value("code_challenge_method").(string)
+
 	// Generate random bytes for the authorization code
 	randomBytes := make([]byte, 32)
 	if _, err := rand.Read(randomBytes); err != nil {
@@ -275,12 +313,14 @@ func (s *OIDCService) Authorize(ctx context.Context, clientID, redirectURI, stat
 	code := base64.RawURLEncoding.EncodeToString(randomBytes)
 
 	authCode := &domain.AuthorizationCode{
-		Code:      code,
-		ClientID:  clientID,
-		UserID:    userID,
-		Scopes:    []string{scope},
-		ExpiresAt: time.Now().Add(10 * time.Minute),
-		CreatedAt: time.Now(),
+		Code:                code,
+		ClientID:            clientID,
+		UserID:              userID,
+		Scopes:              []string{scope},
+		ExpiresAt:           time.Now().Add(10 * time.Minute),
+		CreatedAt:           time.Now(),
+		CodeChallenge:       codeChallenge,
+		CodeChallengeMethod: codeChallengeMethod,
 	}
 
 	// Store authorization code

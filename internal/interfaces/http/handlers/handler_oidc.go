@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -142,14 +143,13 @@ func (h *OIDCHandler) TokenHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// TODO: Implement PKCE validation
 		if req.CodeVerifier == "" {
-			h.logger.Warn("PKCE not implemented, code_verifier is required")
+			h.logger.Error("Missing code verifier")
 			httperrors.RespondWithError(w, httperrors.ErrCodeInvalidRequest, "PKCE is required", nil, http.StatusBadRequest)
 			return
 		}
 
-		tokenPair, err = h.oidcService.ExchangeCode(r.Context(), req.Code)
+		tokenPair, err = h.oidcService.ExchangeCode(r.Context(), req.Code, req.CodeVerifier)
 		if err != nil {
 			h.logger.Error("ExchangeCode failed", zap.Error(err))
 			switch err {
@@ -159,6 +159,8 @@ func (h *OIDCHandler) TokenHandler(w http.ResponseWriter, r *http.Request) {
 				httperrors.RespondWithError(w, httperrors.ErrCodeAuthentication, "Invalid client", nil, http.StatusBadRequest)
 			case domain.ErrInvalidAuthorizationCode:
 				httperrors.RespondWithError(w, httperrors.ErrCodeInvalidRequest, "Invalid authorization code", nil, http.StatusBadRequest)
+			case domain.ErrInvalidPKCE:
+				httperrors.RespondWithError(w, httperrors.ErrCodeInvalidRequest, "Invalid PKCE", nil, http.StatusBadRequest)
 			default:
 				httperrors.RespondWithError(w, httperrors.ErrCodeInternal, "Token exchange failed", nil, http.StatusInternalServerError)
 			}
@@ -215,13 +217,17 @@ func (h *OIDCHandler) AuthorizeHandler(w http.ResponseWriter, r *http.Request) {
 	state := r.URL.Query().Get("state")
 	scope := r.URL.Query().Get("scope")
 	responseType := r.URL.Query().Get("response_type")
+	codeChallenge := r.URL.Query().Get("code_challenge")
+	codeChallengeMethod := r.URL.Query().Get("code_challenge_method")
 
 	h.logger.Debug("Received authorization request",
 		zap.String("client_id", clientID),
 		zap.String("redirect_uri", redirectURI),
 		zap.String("state", state),
 		zap.String("scope", scope),
-		zap.String("response_type", responseType))
+		zap.String("response_type", responseType),
+		zap.String("code_challenge", codeChallenge),
+		zap.String("code_challenge_method", codeChallengeMethod))
 
 	// Validate required parameters
 	if clientID == "" || redirectURI == "" {
@@ -246,6 +252,19 @@ func (h *OIDCHandler) AuthorizeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate PKCE parameters
+	if codeChallenge == "" {
+		h.logger.Error("Missing code challenge")
+		httperrors.RespondWithError(w, httperrors.ErrCodeInvalidRequest, "PKCE code challenge is required", nil, http.StatusBadRequest)
+		return
+	}
+
+	if codeChallengeMethod != "" && codeChallengeMethod != "S256" && codeChallengeMethod != "plain" {
+		h.logger.Error("Unsupported code challenge method", zap.String("method", codeChallengeMethod))
+		httperrors.RespondWithError(w, httperrors.ErrCodeInvalidRequest, "Unsupported code challenge method", nil, http.StatusBadRequest)
+		return
+	}
+
 	// Get user ID from context (set by auth middleware)
 	userID, ok := r.Context().Value("sub").(string)
 	if !ok || userID == "" {
@@ -254,8 +273,12 @@ func (h *OIDCHandler) AuthorizeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Add PKCE parameters to context
+	ctx := context.WithValue(r.Context(), "code_challenge", codeChallenge)
+	ctx = context.WithValue(ctx, "code_challenge_method", codeChallengeMethod)
+
 	// Generate authorization code
-	code, err := h.oidcService.Authorize(r.Context(), clientID, redirectURI, state, scope)
+	code, err := h.oidcService.Authorize(ctx, clientID, redirectURI, state, scope)
 	if err != nil {
 		h.logger.Error("Authorization failed", zap.Error(err))
 		switch err {

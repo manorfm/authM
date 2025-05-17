@@ -206,8 +206,8 @@ func (m *mockOIDCService) GetOpenIDConfiguration(ctx context.Context) (map[strin
 	return args.Get(0).(map[string]interface{}), args.Error(1)
 }
 
-func (m *mockOIDCService) ExchangeCode(ctx context.Context, code string) (*domain.TokenPair, error) {
-	args := m.Called(ctx, code)
+func (m *mockOIDCService) ExchangeCode(ctx context.Context, code string, codeVerifier string) (*domain.TokenPair, error) {
+	args := m.Called(ctx, code, codeVerifier)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
@@ -286,7 +286,7 @@ func TestHandleOpenIDConfiguration(t *testing.T) {
 			},
 			expectedStatus: http.StatusInternalServerError,
 			expectedBody: map[string]interface{}{
-				"code":    "ERR_004",
+				"code":    httperrors.ErrCodeInternal,
 				"message": "Failed to get OpenID configuration",
 			},
 		},
@@ -366,7 +366,7 @@ func TestHandleJWKS(t *testing.T) {
 			},
 			expectedStatus: http.StatusInternalServerError,
 			expectedBody: map[string]interface{}{
-				"code":    "ERR_004",
+				"code":    httperrors.ErrCodeInternal,
 				"message": "Failed to get JWKS",
 			},
 		},
@@ -418,11 +418,13 @@ func TestHandleAuthorize(t *testing.T) {
 		{
 			name: "successful authorization",
 			queryParams: map[string]string{
-				"client_id":     "client123",
-				"redirect_uri":  "http://localhost:3000/callback",
-				"response_type": "code",
-				"state":         "state123",
-				"scope":         "openid profile",
+				"client_id":             "client123",
+				"redirect_uri":          "http://localhost:3000/callback",
+				"response_type":         "code",
+				"state":                 "state123",
+				"scope":                 "openid profile",
+				"code_challenge":        "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+				"code_challenge_method": "S256",
 			},
 			mockSetup: func() {
 				mockService.On("Authorize", mock.Anything, "client123", "http://localhost:3000/callback", "state123", "openid profile").
@@ -495,11 +497,13 @@ func TestHandleAuthorize(t *testing.T) {
 		{
 			name: "invalid client",
 			queryParams: map[string]string{
-				"client_id":     "invalid_client",
-				"redirect_uri":  "http://localhost:3000/callback",
-				"response_type": "code",
-				"state":         "state123",
-				"scope":         "openid profile",
+				"client_id":             "invalid_client",
+				"redirect_uri":          "http://localhost:3000/callback",
+				"response_type":         "code",
+				"state":                 "state123",
+				"scope":                 "openid profile",
+				"code_challenge":        "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+				"code_challenge_method": "S256",
 			},
 			mockSetup: func() {
 				mockService.On("Authorize", mock.Anything, "invalid_client", "http://localhost:3000/callback", "state123", "openid profile").
@@ -509,6 +513,62 @@ func TestHandleAuthorize(t *testing.T) {
 			expectedBody: httperrors.ErrorResponse{
 				Code:    httperrors.ErrCodeAuthentication,
 				Message: "Invalid client",
+			},
+		},
+		{
+			name: "successful authorization with PKCE",
+			queryParams: map[string]string{
+				"client_id":             "client123",
+				"redirect_uri":          "http://localhost:3000/callback",
+				"response_type":         "code",
+				"state":                 "state123",
+				"scope":                 "openid profile",
+				"code_challenge":        "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+				"code_challenge_method": "S256",
+			},
+			mockSetup: func() {
+				mockService.On("Authorize", mock.Anything, "client123", "http://localhost:3000/callback", "state123", "openid profile").
+					Return("auth_code_123", nil)
+			},
+			expectedStatus:   http.StatusFound,
+			expectedRedirect: "http://localhost:3000/callback?code=auth_code_123&state=state123",
+		},
+		{
+			name: "missing code challenge",
+			queryParams: map[string]string{
+				"client_id":     "client123",
+				"redirect_uri":  "http://localhost:3000/callback",
+				"response_type": "code",
+				"state":         "state123",
+				"scope":         "openid profile",
+			},
+			mockSetup: func() {
+				// No mock setup needed
+			},
+			expectedStatus: http.StatusBadRequest,
+			expectedBody: httperrors.ErrorResponse{
+				Code:    httperrors.ErrCodeInvalidRequest,
+				Message: "PKCE code challenge is required",
+			},
+		},
+		{
+			name: "unsupported code challenge method",
+			queryParams: map[string]string{
+				"client_id":             "client123",
+				"redirect_uri":          "http://localhost:3000/callback",
+				"response_type":         "code",
+				"state":                 "state123",
+				"scope":                 "openid profile",
+				"code_challenge":        "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+				"code_challenge_method": "unsupported",
+			},
+			mockSetup: func() {
+				// No mock setup needed
+			},
+			expectedStatus: http.StatusBadRequest,
+			expectedBody: httperrors.ErrorResponse{
+				Code:    httperrors.ErrCodeInvalidRequest,
+				Message: "Unsupported code challenge method",
 			},
 		},
 	}
@@ -627,7 +687,7 @@ func TestHandleToken(t *testing.T) {
 				CodeVerifier: "code_verifier_123",
 			},
 			mockSetup: func() {
-				mockService.On("ExchangeCode", mock.Anything, "invalid_code").
+				mockService.On("ExchangeCode", mock.Anything, "invalid_code", "code_verifier_123").
 					Return(nil, domain.ErrInvalidCredentials)
 			},
 			expectedStatus: http.StatusBadRequest,
@@ -647,7 +707,7 @@ func TestHandleToken(t *testing.T) {
 				CodeVerifier: "code_verifier_123",
 			},
 			mockSetup: func() {
-				mockService.On("ExchangeCode", mock.Anything, "valid_code").
+				mockService.On("ExchangeCode", mock.Anything, "valid_code", "code_verifier_123").
 					Return(nil, domain.ErrInvalidClient)
 			},
 			expectedStatus: http.StatusBadRequest,
@@ -657,17 +717,37 @@ func TestHandleToken(t *testing.T) {
 			},
 		},
 		{
-			name: "Successful token exchange",
+			name: "Invalid PKCE",
 			requestBody: TokenRequest{
 				GrantType:    "authorization_code",
 				Code:         "valid_code",
 				RedirectURI:  "http://localhost:3000/callback",
 				ClientID:     "client_id",
 				ClientSecret: "client_secret",
-				CodeVerifier: "code_verifier_123",
+				CodeVerifier: "invalid_verifier",
 			},
 			mockSetup: func() {
-				mockService.On("ExchangeCode", mock.Anything, "valid_code").
+				mockService.On("ExchangeCode", mock.Anything, "valid_code", "invalid_verifier").
+					Return(nil, domain.ErrInvalidPKCE)
+			},
+			expectedStatus: http.StatusBadRequest,
+			expectedBody: httperrors.ErrorResponse{
+				Code:    httperrors.ErrCodeInvalidRequest,
+				Message: "Invalid PKCE",
+			},
+		},
+		{
+			name: "Successful token exchange with PKCE",
+			requestBody: TokenRequest{
+				GrantType:    "authorization_code",
+				Code:         "valid_code",
+				RedirectURI:  "http://localhost:3000/callback",
+				ClientID:     "client_id",
+				ClientSecret: "client_secret",
+				CodeVerifier: "valid_verifier",
+			},
+			mockSetup: func() {
+				mockService.On("ExchangeCode", mock.Anything, "valid_code", "valid_verifier").
 					Return(&domain.TokenPair{
 						AccessToken:  "access_token_123",
 						RefreshToken: "refresh_token_123",
@@ -727,6 +807,7 @@ func TestHandleUserInfo(t *testing.T) {
 	tests := []struct {
 		name           string
 		authHeader     string
+		userID         string
 		mockSetup      func()
 		expectedStatus int
 		expectedBody   interface{}
@@ -734,6 +815,7 @@ func TestHandleUserInfo(t *testing.T) {
 		{
 			name:       "user not authenticated",
 			authHeader: "",
+			userID:     "",
 			mockSetup: func() {
 				// No mock setup needed
 			},
@@ -746,6 +828,7 @@ func TestHandleUserInfo(t *testing.T) {
 		{
 			name:       "successful user info",
 			authHeader: "",
+			userID:     "user123",
 			mockSetup: func() {
 				mockService.On("GetUserInfo", mock.Anything, "user123").
 					Return(map[string]interface{}{
@@ -766,6 +849,7 @@ func TestHandleUserInfo(t *testing.T) {
 		{
 			name:       "internal server error",
 			authHeader: "",
+			userID:     "user123",
 			mockSetup: func() {
 				mockService.On("GetUserInfo", mock.Anything, "user123").
 					Return(nil, domain.ErrInternal)
@@ -785,9 +869,8 @@ func TestHandleUserInfo(t *testing.T) {
 			tt.mockSetup()
 
 			req := httptest.NewRequest("GET", "/userinfo", nil)
-			if tt.name == "successful user info" || tt.name == "internal server error" {
-				ctx := req.Context()
-				ctx = context.WithValue(ctx, "sub", "user123")
+			if tt.userID != "" {
+				ctx := context.WithValue(req.Context(), "sub", tt.userID)
 				req = req.WithContext(ctx)
 			}
 
@@ -929,7 +1012,7 @@ func TestOIDCHandler_TokenHandler(t *testing.T) {
 				CodeVerifier: "code_verifier_123",
 			},
 			mockSetup: func() {
-				mockService.On("ExchangeCode", mock.Anything, "auth_code_123").
+				mockService.On("ExchangeCode", mock.Anything, "auth_code_123", "code_verifier_123").
 					Return(&domain.TokenPair{
 						AccessToken:  "access_token_123",
 						RefreshToken: "refresh_token_123",
@@ -1043,7 +1126,7 @@ func TestOIDCHandler_TokenHandler(t *testing.T) {
 				CodeVerifier: "code_verifier_123",
 			},
 			mockSetup: func() {
-				mockService.On("ExchangeCode", mock.Anything, "invalid_code").
+				mockService.On("ExchangeCode", mock.Anything, "invalid_code", "code_verifier_123").
 					Return(nil, domain.ErrInvalidCredentials)
 			},
 			expectedStatus: http.StatusBadRequest,
@@ -1314,11 +1397,13 @@ func TestOIDCHandler_AuthorizeHandler(t *testing.T) {
 		{
 			name: "successful authorization",
 			queryParams: map[string]string{
-				"client_id":     "client123",
-				"redirect_uri":  "http://localhost:3000/callback",
-				"response_type": "code",
-				"state":         "state123",
-				"scope":         "openid profile",
+				"client_id":             "client123",
+				"redirect_uri":          "http://localhost:3000/callback",
+				"response_type":         "code",
+				"state":                 "state123",
+				"scope":                 "openid profile",
+				"code_challenge":        "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+				"code_challenge_method": "S256",
 			},
 			mockSetup: func() {
 				mockService.On("Authorize", mock.Anything, "client123", "http://localhost:3000/callback", "state123", "openid profile").
@@ -1391,11 +1476,13 @@ func TestOIDCHandler_AuthorizeHandler(t *testing.T) {
 		{
 			name: "invalid client",
 			queryParams: map[string]string{
-				"client_id":     "invalid_client",
-				"redirect_uri":  "http://localhost:3000/callback",
-				"response_type": "code",
-				"state":         "state123",
-				"scope":         "openid profile",
+				"client_id":             "invalid_client",
+				"redirect_uri":          "http://localhost:3000/callback",
+				"response_type":         "code",
+				"state":                 "state123",
+				"scope":                 "openid profile",
+				"code_challenge":        "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+				"code_challenge_method": "S256",
 			},
 			mockSetup: func() {
 				mockService.On("Authorize", mock.Anything, "invalid_client", "http://localhost:3000/callback", "state123", "openid profile").
@@ -1405,6 +1492,62 @@ func TestOIDCHandler_AuthorizeHandler(t *testing.T) {
 			expectedBody: httperrors.ErrorResponse{
 				Code:    httperrors.ErrCodeAuthentication,
 				Message: "Invalid client",
+			},
+		},
+		{
+			name: "successful authorization with PKCE",
+			queryParams: map[string]string{
+				"client_id":             "client123",
+				"redirect_uri":          "http://localhost:3000/callback",
+				"response_type":         "code",
+				"state":                 "state123",
+				"scope":                 "openid profile",
+				"code_challenge":        "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+				"code_challenge_method": "S256",
+			},
+			mockSetup: func() {
+				mockService.On("Authorize", mock.Anything, "client123", "http://localhost:3000/callback", "state123", "openid profile").
+					Return("auth_code_123", nil)
+			},
+			expectedStatus:   http.StatusFound,
+			expectedRedirect: "http://localhost:3000/callback?code=auth_code_123&state=state123",
+		},
+		{
+			name: "missing code challenge",
+			queryParams: map[string]string{
+				"client_id":     "client123",
+				"redirect_uri":  "http://localhost:3000/callback",
+				"response_type": "code",
+				"state":         "state123",
+				"scope":         "openid profile",
+			},
+			mockSetup: func() {
+				// No mock setup needed
+			},
+			expectedStatus: http.StatusBadRequest,
+			expectedBody: httperrors.ErrorResponse{
+				Code:    httperrors.ErrCodeInvalidRequest,
+				Message: "PKCE code challenge is required",
+			},
+		},
+		{
+			name: "unsupported code challenge method",
+			queryParams: map[string]string{
+				"client_id":             "client123",
+				"redirect_uri":          "http://localhost:3000/callback",
+				"response_type":         "code",
+				"state":                 "state123",
+				"scope":                 "openid profile",
+				"code_challenge":        "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+				"code_challenge_method": "unsupported",
+			},
+			mockSetup: func() {
+				// No mock setup needed
+			},
+			expectedStatus: http.StatusBadRequest,
+			expectedBody: httperrors.ErrorResponse{
+				Code:    httperrors.ErrCodeInvalidRequest,
+				Message: "Unsupported code challenge method",
 			},
 		},
 	}
