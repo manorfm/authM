@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ipede/user-manager-service/internal/domain"
@@ -275,19 +276,23 @@ func (s *OIDCService) Authorize(ctx context.Context, clientID, redirectURI, stat
 		return "", domain.ErrInvalidClient
 	}
 
-	// Validate scope
+	// Validate scope (now supports multiple scopes)
+	var requestedScopes []string
 	if scope != "" {
-		validScope := false
-		for _, allowedScope := range client.Scopes {
-			if scope == allowedScope {
-				validScope = true
-				break
+		requestedScopes = splitAndTrim(scope, " ")
+		for _, reqScope := range requestedScopes {
+			found := false
+			for _, allowedScope := range client.Scopes {
+				if reqScope == allowedScope {
+					found = true
+					break
+				}
 			}
-		}
-		if !validScope {
-			s.logger.Error("Invalid scope",
-				zap.String("scope", scope))
-			return "", domain.ErrInvalidScope
+			if !found {
+				s.logger.Error("Invalid scope",
+					zap.String("scope", reqScope))
+				return "", domain.ErrInvalidScope
+			}
 		}
 	}
 
@@ -316,7 +321,7 @@ func (s *OIDCService) Authorize(ctx context.Context, clientID, redirectURI, stat
 		Code:                code,
 		ClientID:            clientID,
 		UserID:              userID,
-		Scopes:              []string{scope},
+		Scopes:              requestedScopes,
 		ExpiresAt:           time.Now().Add(10 * time.Minute),
 		CreatedAt:           time.Now(),
 		CodeChallenge:       codeChallenge,
@@ -330,6 +335,18 @@ func (s *OIDCService) Authorize(ctx context.Context, clientID, redirectURI, stat
 	}
 
 	return code, nil
+}
+
+// splitAndTrim splits a string by the given separator and trims each element.
+func splitAndTrim(s, sep string) []string {
+	var result []string
+	for _, part := range strings.Split(s, sep) {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
 }
 
 func (s *OIDCService) convertToJWK(publicKey *rsa.PublicKey) (map[string]interface{}, error) {
