@@ -22,8 +22,15 @@ func NewOIDCHandler(service domain.OIDCService, logger *zap.Logger) *OIDCHandler
 }
 
 func (h *OIDCHandler) GetUserInfoHandler(w http.ResponseWriter, r *http.Request) {
-	userID, ok := r.Context().Value("user_id").(string)
+	h.logger.Debug("Getting user info from context",
+		zap.Any("sub", r.Context().Value("sub")),
+		zap.Any("roles", r.Context().Value("roles")))
+
+	userID, ok := r.Context().Value("sub").(string)
 	if !ok || userID == "" {
+		h.logger.Error("Failed to get user ID from context",
+			zap.Any("user_id", r.Context().Value("sub")),
+			zap.Bool("ok", ok))
 		httperrors.RespondWithError(w, httperrors.ErrCodeAuthentication, "User not authenticated", nil, http.StatusUnauthorized)
 		return
 	}

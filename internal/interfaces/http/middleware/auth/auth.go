@@ -29,12 +29,17 @@ func (m *AuthMiddleware) Authenticator(next http.Handler) http.Handler {
 
 		claims, err := m.jwt.ValidateToken(token)
 		if err != nil {
+			m.logger.Error("Failed to validate token", zap.Error(err))
 			httperrors.RespondWithError(w, httperrors.ErrCodeAuthentication, "Invalid token", nil, http.StatusUnauthorized)
 			return
 		}
 
-		//ctx := context.WithValue(r.Context(), "user_id", claims.UserID.String())
-		ctx := context.WithValue(r.Context(), "roles", claims.Roles)
+		m.logger.Debug("Token validated successfully",
+			zap.String("subject", claims.Subject),
+			zap.Strings("roles", claims.Roles))
+
+		ctx := context.WithValue(r.Context(), "sub", claims.Subject)
+		ctx = context.WithValue(ctx, "roles", claims.Roles)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

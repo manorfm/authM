@@ -731,7 +731,7 @@ func TestHandleUserInfo(t *testing.T) {
 			req := httptest.NewRequest("GET", "/userinfo", nil)
 			if tt.name == "successful user info" || tt.name == "internal server error" {
 				ctx := req.Context()
-				ctx = context.WithValue(ctx, "user_id", "user123")
+				ctx = context.WithValue(ctx, "sub", "user123")
 				req = req.WithContext(ctx)
 			}
 
@@ -824,7 +824,7 @@ func TestOIDCHandler_GetUserInfoHandler(t *testing.T) {
 
 			req := httptest.NewRequest("GET", "/userinfo", nil)
 			if tt.userID != "" {
-				ctx := context.WithValue(req.Context(), "user_id", tt.userID)
+				ctx := context.WithValue(req.Context(), "sub", tt.userID)
 				req = req.WithContext(ctx)
 			}
 
