@@ -18,9 +18,9 @@ func NewUserRepository(db *database.Postgres) *UserRepository {
 
 func (r *UserRepository) Create(ctx context.Context, user *domain.User) error {
 	return r.db.Exec(ctx, `
-		INSERT INTO users (id, name, email, password, phone, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-	`, user.ID.String(), user.Name, user.Email, user.Password, user.Phone, user.CreatedAt, user.UpdatedAt)
+		INSERT INTO users (id, name, email, password, phone, created_at, updated_at, roles)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+	`, user.ID.String(), user.Name, user.Email, user.Password, user.Phone, user.CreatedAt, user.UpdatedAt, user.Roles)
 }
 
 func (r *UserRepository) FindByID(ctx context.Context, id ulid.ULID) (*domain.User, error) {
