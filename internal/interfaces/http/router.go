@@ -60,9 +60,6 @@ func NewRouter(
 	router.Group(func(r chi.Router) {
 		r.Get("/.well-known/openid-configuration", oidcHandler.GetOpenIDConfigurationHandler)
 		r.Get("/.well-known/jwks.json", oidcHandler.GetJWKSHandler)
-		r.Get("/oauth2/authorize", oidcHandler.AuthorizeHandler)
-		r.Post("/oauth2/token", oidcHandler.TokenHandler)
-		r.Get("/oauth2/userinfo", oidcHandler.GetUserInfoHandler)
 	})
 
 	// Admin routes
@@ -76,6 +73,9 @@ func NewRouter(
 		r.Use(authMiddleware.Authenticator)
 		r.Get("/users/{id}", userHandler.GetUserHandler)
 		r.Put("/users/{id}", userHandler.UpdateUserHandler)
+		r.Get("/oauth2/authorize", oidcHandler.AuthorizeHandler)
+		r.Post("/oauth2/token", oidcHandler.TokenHandler)
+		r.Get("/oauth2/userinfo", oidcHandler.GetUserInfoHandler)
 	})
 
 	return &Router{router: router}
