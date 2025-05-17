@@ -418,23 +418,60 @@ func TestHandleAuthorize(t *testing.T) {
 		{
 			name: "successful authorization",
 			queryParams: map[string]string{
+				"client_id":     "client123",
+				"redirect_uri":  "http://localhost:3000/callback",
+				"response_type": "code",
+				"state":         "state123",
+				"scope":         "openid profile",
+			},
+			mockSetup: func() {
+				mockService.On("Authorize", mock.Anything, "client123", "http://localhost:3000/callback", "state123", "openid profile").
+					Return("auth_code_123", nil)
+			},
+			expectedStatus:   http.StatusFound,
+			expectedRedirect: "http://localhost:3000/callback?code=auth_code_123&state=state123",
+		},
+		{
+			name: "missing response type",
+			queryParams: map[string]string{
 				"client_id":    "client123",
-				"redirect_uri": "http://example.com/callback",
+				"redirect_uri": "http://localhost:3000/callback",
 				"state":        "state123",
 				"scope":        "openid profile",
 			},
 			mockSetup: func() {
-				mockService.On("Authorize", mock.Anything, "client123", "http://example.com/callback", "state123", "openid profile").
-					Return("auth_code_123", nil)
+				// No mock setup needed
 			},
-			expectedStatus:   http.StatusFound,
-			expectedRedirect: "http://example.com/callback?code=auth_code_123&state=state123",
+			expectedStatus: http.StatusBadRequest,
+			expectedBody: httperrors.ErrorResponse{
+				Code:    httperrors.ErrCodeInvalidRequest,
+				Message: "Unsupported response type",
+			},
+		},
+		{
+			name: "unsupported response type",
+			queryParams: map[string]string{
+				"client_id":     "client123",
+				"redirect_uri":  "http://localhost:3000/callback",
+				"response_type": "token",
+				"state":         "state123",
+				"scope":         "openid profile",
+			},
+			mockSetup: func() {
+				// No mock setup needed
+			},
+			expectedStatus: http.StatusBadRequest,
+			expectedBody: httperrors.ErrorResponse{
+				Code:    httperrors.ErrCodeInvalidRequest,
+				Message: "Unsupported response type",
+			},
 		},
 		{
 			name: "missing required parameters",
 			queryParams: map[string]string{
-				"state": "state123",
-				"scope": "openid profile",
+				"response_type": "code",
+				"state":         "state123",
+				"scope":         "openid profile",
 			},
 			mockSetup: func() {
 				// No mock setup needed
@@ -458,13 +495,14 @@ func TestHandleAuthorize(t *testing.T) {
 		{
 			name: "invalid client",
 			queryParams: map[string]string{
-				"client_id":    "invalid_client",
-				"redirect_uri": "http://example.com/callback",
-				"state":        "state123",
-				"scope":        "openid profile",
+				"client_id":     "invalid_client",
+				"redirect_uri":  "http://localhost:3000/callback",
+				"response_type": "code",
+				"state":         "state123",
+				"scope":         "openid profile",
 			},
 			mockSetup: func() {
-				mockService.On("Authorize", mock.Anything, "invalid_client", "http://example.com/callback", "state123", "openid profile").
+				mockService.On("Authorize", mock.Anything, "invalid_client", "http://localhost:3000/callback", "state123", "openid profile").
 					Return("", domain.ErrInvalidClient)
 			},
 			expectedStatus: http.StatusBadRequest,
@@ -477,14 +515,21 @@ func TestHandleAuthorize(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Reset mock before each test
+			mockService.ExpectedCalls = nil
 			tt.mockSetup()
 
-			req := httptest.NewRequest("GET", "/authorize", nil)
+			// Create request with query parameters
+			req := httptest.NewRequest("GET", "/oauth2/authorize", nil)
 			q := req.URL.Query()
 			for key, value := range tt.queryParams {
-				q.Add(key, value)
+				q.Set(key, value)
 			}
 			req.URL.RawQuery = q.Encode()
+
+			// Add user ID to context
+			ctx := context.WithValue(req.Context(), "sub", "user123")
+			req = req.WithContext(ctx)
 
 			rr := httptest.NewRecorder()
 			handler.AuthorizeHandler(rr, req)
@@ -492,12 +537,14 @@ func TestHandleAuthorize(t *testing.T) {
 			assert.Equal(t, tt.expectedStatus, rr.Code)
 
 			if tt.expectedStatus == http.StatusFound {
-				assert.Equal(t, tt.expectedRedirect, rr.Header().Get("Location"))
+				// Check redirect URL
+				location := rr.Header().Get("Location")
+				assert.Equal(t, tt.expectedRedirect, location)
 			} else {
 				var response httperrors.ErrorResponse
 				err := json.NewDecoder(rr.Body).Decode(&response)
 				assert.NoError(t, err)
-				assert.Equal(t, tt.expectedBody, response)
+				assert.Equal(t, tt.expectedBody.(httperrors.ErrorResponse), response)
 			}
 
 			mockService.AssertExpectations(t)
@@ -528,13 +575,7 @@ func TestHandleToken(t *testing.T) {
 			expectedStatus: http.StatusBadRequest,
 			expectedBody: httperrors.ErrorResponse{
 				Code:    httperrors.ErrCodeValidation,
-				Message: "Validation failed",
-				Details: []httperrors.ErrorDetail{
-					{
-						Field:   "code",
-						Message: "Authorization code is required",
-					},
-				},
+				Message: "Missing client credentials",
 			},
 		},
 		{
@@ -545,6 +586,7 @@ func TestHandleToken(t *testing.T) {
 				RedirectURI:  "http://localhost:3000/callback",
 				ClientID:     "client_id",
 				ClientSecret: "client_secret",
+				CodeVerifier: "code_verifier_123",
 			},
 			mockSetup: func() {
 				// No mock setup needed for invalid grant type
@@ -553,12 +595,25 @@ func TestHandleToken(t *testing.T) {
 			expectedBody: httperrors.ErrorResponse{
 				Code:    httperrors.ErrCodeInvalidRequest,
 				Message: "Unsupported grant type",
-				Details: []httperrors.ErrorDetail{
-					{
-						Field:   "grant_type",
-						Message: "Unsupported grant type",
-					},
-				},
+			},
+		},
+		{
+			name: "Missing code verifier",
+			requestBody: TokenRequest{
+				GrantType:    "authorization_code",
+				Code:         "valid_code",
+				RedirectURI:  "http://localhost:3000/callback",
+				ClientID:     "client_id",
+				ClientSecret: "client_secret",
+				// missing code_verifier
+			},
+			mockSetup: func() {
+				// No mock setup needed
+			},
+			expectedStatus: http.StatusBadRequest,
+			expectedBody: httperrors.ErrorResponse{
+				Code:    httperrors.ErrCodeInvalidRequest,
+				Message: "PKCE is required",
 			},
 		},
 		{
@@ -569,6 +624,7 @@ func TestHandleToken(t *testing.T) {
 				RedirectURI:  "http://localhost:3000/callback",
 				ClientID:     "client_id",
 				ClientSecret: "client_secret",
+				CodeVerifier: "code_verifier_123",
 			},
 			mockSetup: func() {
 				mockService.On("ExchangeCode", mock.Anything, "invalid_code").
@@ -588,6 +644,7 @@ func TestHandleToken(t *testing.T) {
 				RedirectURI:  "http://localhost:3000/callback",
 				ClientID:     "invalid_client",
 				ClientSecret: "invalid_secret",
+				CodeVerifier: "code_verifier_123",
 			},
 			mockSetup: func() {
 				mockService.On("ExchangeCode", mock.Anything, "valid_code").
@@ -607,10 +664,9 @@ func TestHandleToken(t *testing.T) {
 				RedirectURI:  "http://localhost:3000/callback",
 				ClientID:     "client_id",
 				ClientSecret: "client_secret",
+				CodeVerifier: "code_verifier_123",
 			},
 			mockSetup: func() {
-				// Clear any existing mock expectations
-				mockService.ExpectedCalls = nil
 				mockService.On("ExchangeCode", mock.Anything, "valid_code").
 					Return(&domain.TokenPair{
 						AccessToken:  "access_token_123",
@@ -638,7 +694,7 @@ func TestHandleToken(t *testing.T) {
 				body, _ = json.Marshal(tt.requestBody)
 			}
 
-			req := httptest.NewRequest("POST", "/token", bytes.NewBuffer(body))
+			req := httptest.NewRequest("POST", "/oauth2/token", bytes.NewBuffer(body))
 			req.Header.Set("Content-Type", "application/json")
 
 			rr := httptest.NewRecorder()
@@ -655,7 +711,7 @@ func TestHandleToken(t *testing.T) {
 				var response httperrors.ErrorResponse
 				err := json.NewDecoder(rr.Body).Decode(&response)
 				assert.NoError(t, err)
-				assert.Equal(t, tt.expectedBody, response)
+				assert.Equal(t, tt.expectedBody.(httperrors.ErrorResponse), response)
 			}
 
 			mockService.AssertExpectations(t)
@@ -869,6 +925,8 @@ func TestOIDCHandler_TokenHandler(t *testing.T) {
 				Code:         "auth_code_123",
 				ClientID:     "client123",
 				ClientSecret: "secret123",
+				RedirectURI:  "http://localhost:3000/callback",
+				CodeVerifier: "code_verifier_123",
 			},
 			mockSetup: func() {
 				mockService.On("ExchangeCode", mock.Anything, "auth_code_123").
@@ -888,6 +946,8 @@ func TestOIDCHandler_TokenHandler(t *testing.T) {
 			requestBody: TokenRequest{
 				GrantType:    "refresh_token",
 				RefreshToken: "refresh_token_123",
+				ClientID:     "client123",
+				ClientSecret: "secret123",
 			},
 			mockSetup: func() {
 				mockService.On("RefreshToken", mock.Anything, "refresh_token_123").
@@ -903,21 +963,28 @@ func TestOIDCHandler_TokenHandler(t *testing.T) {
 			},
 		},
 		{
-			name:        "invalid request body",
-			requestBody: "invalid json",
+			name: "missing client credentials",
+			requestBody: TokenRequest{
+				GrantType: "authorization_code",
+				Code:      "auth_code_123",
+				// missing client_id and client_secret
+			},
 			mockSetup: func() {
 				// No mock setup needed
 			},
 			expectedStatus: http.StatusBadRequest,
 			expectedBody: httperrors.ErrorResponse{
-				Code:    httperrors.ErrCodeInvalidRequest,
-				Message: "Invalid request body",
+				Code:    httperrors.ErrCodeValidation,
+				Message: "Missing client credentials",
 			},
 		},
 		{
 			name: "missing authorization code",
 			requestBody: TokenRequest{
-				GrantType: "authorization_code",
+				GrantType:    "authorization_code",
+				ClientID:     "client123",
+				ClientSecret: "secret123",
+				// missing code
 			},
 			mockSetup: func() {
 				// No mock setup needed
@@ -925,19 +992,17 @@ func TestOIDCHandler_TokenHandler(t *testing.T) {
 			expectedStatus: http.StatusBadRequest,
 			expectedBody: httperrors.ErrorResponse{
 				Code:    httperrors.ErrCodeValidation,
-				Message: "Validation failed",
-				Details: []httperrors.ErrorDetail{
-					{
-						Field:   "code",
-						Message: "Authorization code is required",
-					},
-				},
+				Message: "Missing authorization code",
 			},
 		},
 		{
-			name: "missing refresh token",
+			name: "missing redirect URI",
 			requestBody: TokenRequest{
-				GrantType: "refresh_token",
+				GrantType:    "authorization_code",
+				Code:         "auth_code_123",
+				ClientID:     "client123",
+				ClientSecret: "secret123",
+				// missing redirect_uri
 			},
 			mockSetup: func() {
 				// No mock setup needed
@@ -945,19 +1010,18 @@ func TestOIDCHandler_TokenHandler(t *testing.T) {
 			expectedStatus: http.StatusBadRequest,
 			expectedBody: httperrors.ErrorResponse{
 				Code:    httperrors.ErrCodeValidation,
-				Message: "Validation failed",
-				Details: []httperrors.ErrorDetail{
-					{
-						Field:   "refresh_token",
-						Message: "Refresh token is required",
-					},
-				},
+				Message: "Missing redirect URI",
 			},
 		},
 		{
-			name: "invalid grant type",
+			name: "missing code verifier",
 			requestBody: TokenRequest{
-				GrantType: "invalid_grant_type",
+				GrantType:    "authorization_code",
+				Code:         "auth_code_123",
+				ClientID:     "client123",
+				ClientSecret: "secret123",
+				RedirectURI:  "http://localhost:3000/callback",
+				// missing code_verifier
 			},
 			mockSetup: func() {
 				// No mock setup needed
@@ -965,22 +1029,18 @@ func TestOIDCHandler_TokenHandler(t *testing.T) {
 			expectedStatus: http.StatusBadRequest,
 			expectedBody: httperrors.ErrorResponse{
 				Code:    httperrors.ErrCodeInvalidRequest,
-				Message: "Unsupported grant type",
-				Details: []httperrors.ErrorDetail{
-					{
-						Field:   "grant_type",
-						Message: "Unsupported grant type",
-					},
-				},
+				Message: "PKCE is required",
 			},
 		},
 		{
-			name: "invalid credentials",
+			name: "invalid authorization code",
 			requestBody: TokenRequest{
 				GrantType:    "authorization_code",
 				Code:         "invalid_code",
 				ClientID:     "client123",
 				ClientSecret: "secret123",
+				RedirectURI:  "http://localhost:3000/callback",
+				CodeVerifier: "code_verifier_123",
 			},
 			mockSetup: func() {
 				mockService.On("ExchangeCode", mock.Anything, "invalid_code").
@@ -993,21 +1053,37 @@ func TestOIDCHandler_TokenHandler(t *testing.T) {
 			},
 		},
 		{
-			name: "invalid client",
+			name: "invalid refresh token",
 			requestBody: TokenRequest{
-				GrantType:    "authorization_code",
-				Code:         "valid_code",
-				ClientID:     "invalid_client",
-				ClientSecret: "invalid_secret",
+				GrantType:    "refresh_token",
+				RefreshToken: "invalid_token",
+				ClientID:     "client123",
+				ClientSecret: "secret123",
 			},
 			mockSetup: func() {
-				mockService.On("ExchangeCode", mock.Anything, "valid_code").
-					Return(nil, domain.ErrInvalidClient)
+				mockService.On("RefreshToken", mock.Anything, "invalid_token").
+					Return(nil, domain.ErrInvalidCredentials)
 			},
 			expectedStatus: http.StatusBadRequest,
 			expectedBody: httperrors.ErrorResponse{
 				Code:    httperrors.ErrCodeAuthentication,
-				Message: "Invalid client",
+				Message: "Invalid credentials",
+			},
+		},
+		{
+			name: "unsupported grant type",
+			requestBody: TokenRequest{
+				GrantType:    "unsupported",
+				ClientID:     "client123",
+				ClientSecret: "secret123",
+			},
+			mockSetup: func() {
+				// No mock setup needed
+			},
+			expectedStatus: http.StatusBadRequest,
+			expectedBody: httperrors.ErrorResponse{
+				Code:    httperrors.ErrCodeInvalidRequest,
+				Message: "Unsupported grant type",
 			},
 		},
 	}
@@ -1025,7 +1101,7 @@ func TestOIDCHandler_TokenHandler(t *testing.T) {
 				body, _ = json.Marshal(tt.requestBody)
 			}
 
-			req := httptest.NewRequest("POST", "/token", bytes.NewBuffer(body))
+			req := httptest.NewRequest("POST", "/oauth2/token", bytes.NewBuffer(body))
 			req.Header.Set("Content-Type", "application/json")
 
 			rr := httptest.NewRecorder()
@@ -1042,7 +1118,7 @@ func TestOIDCHandler_TokenHandler(t *testing.T) {
 				var response httperrors.ErrorResponse
 				err := json.NewDecoder(rr.Body).Decode(&response)
 				assert.NoError(t, err)
-				assert.Equal(t, tt.expectedBody, response)
+				assert.Equal(t, tt.expectedBody.(httperrors.ErrorResponse), response)
 			}
 
 			mockService.AssertExpectations(t)
@@ -1215,6 +1291,156 @@ func TestOIDCHandler_GetOpenIDConfigurationHandler(t *testing.T) {
 				err := json.NewDecoder(rr.Body).Decode(&response)
 				assert.NoError(t, err)
 				assert.Equal(t, tt.expectedBody, response)
+			}
+
+			mockService.AssertExpectations(t)
+		})
+	}
+}
+
+func TestOIDCHandler_AuthorizeHandler(t *testing.T) {
+	logger, _ := zap.NewProduction()
+	mockService := new(mockOIDCService)
+	handler := NewOIDCHandler(mockService, logger)
+
+	tests := []struct {
+		name             string
+		queryParams      map[string]string
+		mockSetup        func()
+		expectedStatus   int
+		expectedBody     interface{}
+		expectedRedirect string
+	}{
+		{
+			name: "successful authorization",
+			queryParams: map[string]string{
+				"client_id":     "client123",
+				"redirect_uri":  "http://localhost:3000/callback",
+				"response_type": "code",
+				"state":         "state123",
+				"scope":         "openid profile",
+			},
+			mockSetup: func() {
+				mockService.On("Authorize", mock.Anything, "client123", "http://localhost:3000/callback", "state123", "openid profile").
+					Return("auth_code_123", nil)
+			},
+			expectedStatus:   http.StatusFound,
+			expectedRedirect: "http://localhost:3000/callback?code=auth_code_123&state=state123",
+		},
+		{
+			name: "missing response type",
+			queryParams: map[string]string{
+				"client_id":    "client123",
+				"redirect_uri": "http://localhost:3000/callback",
+				"state":        "state123",
+				"scope":        "openid profile",
+			},
+			mockSetup: func() {
+				// No mock setup needed
+			},
+			expectedStatus: http.StatusBadRequest,
+			expectedBody: httperrors.ErrorResponse{
+				Code:    httperrors.ErrCodeInvalidRequest,
+				Message: "Unsupported response type",
+			},
+		},
+		{
+			name: "unsupported response type",
+			queryParams: map[string]string{
+				"client_id":     "client123",
+				"redirect_uri":  "http://localhost:3000/callback",
+				"response_type": "token",
+				"state":         "state123",
+				"scope":         "openid profile",
+			},
+			mockSetup: func() {
+				// No mock setup needed
+			},
+			expectedStatus: http.StatusBadRequest,
+			expectedBody: httperrors.ErrorResponse{
+				Code:    httperrors.ErrCodeInvalidRequest,
+				Message: "Unsupported response type",
+			},
+		},
+		{
+			name: "missing required parameters",
+			queryParams: map[string]string{
+				"response_type": "code",
+				"state":         "state123",
+				"scope":         "openid profile",
+			},
+			mockSetup: func() {
+				// No mock setup needed
+			},
+			expectedStatus: http.StatusBadRequest,
+			expectedBody: httperrors.ErrorResponse{
+				Code:    httperrors.ErrCodeValidation,
+				Message: "Validation failed",
+				Details: []httperrors.ErrorDetail{
+					{
+						Field:   "client_id",
+						Message: "client_id is required",
+					},
+					{
+						Field:   "redirect_uri",
+						Message: "redirect_uri is required",
+					},
+				},
+			},
+		},
+		{
+			name: "invalid client",
+			queryParams: map[string]string{
+				"client_id":     "invalid_client",
+				"redirect_uri":  "http://localhost:3000/callback",
+				"response_type": "code",
+				"state":         "state123",
+				"scope":         "openid profile",
+			},
+			mockSetup: func() {
+				mockService.On("Authorize", mock.Anything, "invalid_client", "http://localhost:3000/callback", "state123", "openid profile").
+					Return("", domain.ErrInvalidClient)
+			},
+			expectedStatus: http.StatusBadRequest,
+			expectedBody: httperrors.ErrorResponse{
+				Code:    httperrors.ErrCodeAuthentication,
+				Message: "Invalid client",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Reset mock before each test
+			mockService.ExpectedCalls = nil
+			tt.mockSetup()
+
+			// Create request with query parameters
+			req := httptest.NewRequest("GET", "/oauth2/authorize", nil)
+			q := req.URL.Query()
+			for key, value := range tt.queryParams {
+				q.Set(key, value)
+			}
+			req.URL.RawQuery = q.Encode()
+
+			// Add user ID to context
+			ctx := context.WithValue(req.Context(), "sub", "user123")
+			req = req.WithContext(ctx)
+
+			rr := httptest.NewRecorder()
+			handler.AuthorizeHandler(rr, req)
+
+			assert.Equal(t, tt.expectedStatus, rr.Code)
+
+			if tt.expectedStatus == http.StatusFound {
+				// Check redirect URL
+				location := rr.Header().Get("Location")
+				assert.Equal(t, tt.expectedRedirect, location)
+			} else {
+				var response httperrors.ErrorResponse
+				err := json.NewDecoder(rr.Body).Decode(&response)
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expectedBody.(httperrors.ErrorResponse), response)
 			}
 
 			mockService.AssertExpectations(t)

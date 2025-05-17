@@ -2,7 +2,6 @@ package application
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
@@ -193,7 +192,7 @@ func TestAuthService_Login(t *testing.T) {
 			password:    "password123",
 			mockUser:    nil,
 			mockError:   assert.AnError,
-			expectedErr: fmt.Errorf("failed to find user: %w", assert.AnError),
+			expectedErr: domain.ErrUserNotFound,
 		},
 	}
 

@@ -3,11 +3,13 @@ package application
 import (
 	"context"
 	"crypto/rsa"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"time"
 
 	"github.com/ipede/user-manager-service/internal/domain"
 	"github.com/ipede/user-manager-service/internal/infrastructure/jwt"
-	"github.com/ipede/user-manager-service/internal/infrastructure/repository"
 	"github.com/oklog/ulid/v2"
 	"go.uber.org/zap"
 )
@@ -15,30 +17,44 @@ import (
 type OIDCService struct {
 	authService domain.AuthService
 	jwtService  *jwt.JWT
-	userRepo    *repository.UserRepository
+	userRepo    domain.UserRepository
+	oauthRepo   domain.OAuth2Repository
 	logger      *zap.Logger
 }
 
 func NewOIDCService(
 	authService domain.AuthService,
 	jwtService *jwt.JWT,
-	userRepo *repository.UserRepository,
+	userRepo domain.UserRepository,
+	oauthRepo domain.OAuth2Repository,
+	logger *zap.Logger,
 ) domain.OIDCService {
 	return &OIDCService{
 		authService: authService,
 		jwtService:  jwtService,
 		userRepo:    userRepo,
+		oauthRepo:   oauthRepo,
+		logger:      logger,
 	}
 }
 
 func (s *OIDCService) GetUserInfo(ctx context.Context, userID string) (map[string]interface{}, error) {
+	s.logger.Debug("Getting user info",
+		zap.String("user_id", userID))
+
 	id, err := ulid.Parse(userID)
 	if err != nil {
+		s.logger.Error("Failed to parse user ID",
+			zap.String("user_id", userID),
+			zap.Error(err))
 		return nil, err
 	}
 
 	user, err := s.userRepo.FindByID(ctx, id)
 	if err != nil {
+		s.logger.Error("Failed to find user",
+			zap.String("user_id", userID),
+			zap.Error(err))
 		return nil, err
 	}
 
@@ -51,15 +67,20 @@ func (s *OIDCService) GetUserInfo(ctx context.Context, userID string) (map[strin
 }
 
 func (s *OIDCService) GetJWKS(ctx context.Context) (map[string]interface{}, error) {
+	s.logger.Debug("Getting JWKS")
+
 	// Get the public key from JWT service
 	publicKey := s.jwtService.GetPublicKey()
 	if publicKey == nil {
+		s.logger.Error("Failed to get public key")
 		return nil, domain.ErrInvalidClient
 	}
 
 	// Convert public key to JWK format
 	jwk, err := s.convertToJWK(publicKey)
 	if err != nil {
+		s.logger.Error("Failed to convert public key to JWK",
+			zap.Error(err))
 		return nil, err
 	}
 
@@ -69,6 +90,8 @@ func (s *OIDCService) GetJWKS(ctx context.Context) (map[string]interface{}, erro
 }
 
 func (s *OIDCService) GetOpenIDConfiguration(ctx context.Context) (map[string]interface{}, error) {
+	s.logger.Debug("Getting OpenID configuration")
+
 	return map[string]interface{}{
 		"issuer":                                "http://localhost:8080",
 		"authorization_endpoint":                "http://localhost:8080/oauth2/authorize",
@@ -85,21 +108,57 @@ func (s *OIDCService) GetOpenIDConfiguration(ctx context.Context) (map[string]in
 }
 
 func (s *OIDCService) ExchangeCode(ctx context.Context, code string) (*domain.TokenPair, error) {
-	// Validate the authorization code and get user info
-	// This is a simplified implementation
-	id, err := ulid.Parse("01HXSAXHRYPHM8ZP5STF47CFP8") // Example user ID
+	s.logger.Debug("Exchanging authorization code for tokens",
+		zap.String("code", code))
+
+	// Get authorization code from repository
+	authCode, err := s.oauthRepo.GetAuthorizationCode(ctx, code)
 	if err != nil {
-		return nil, err
+		s.logger.Error("Failed to get authorization code",
+			zap.Error(err))
+		return nil, fmt.Errorf("invalid authorization code: %w", err)
 	}
 
-	scopes := []string{"openid", "profile"}
+	// Check if code is expired
+	if authCode.ExpiresAt.Before(time.Now()) {
+		s.logger.Error("Authorization code expired",
+			zap.Time("expires_at", authCode.ExpiresAt))
+		return nil, fmt.Errorf("authorization code expired")
+	}
+
+	// Get user from repository
+	userID, err := ulid.Parse(authCode.UserID)
+	if err != nil {
+		s.logger.Error("Failed to parse user ID",
+			zap.String("user_id", authCode.UserID),
+			zap.Error(err))
+		return nil, fmt.Errorf("invalid user ID: %w", err)
+	}
+
+	user, err := s.userRepo.FindByID(ctx, userID)
+	if err != nil {
+		s.logger.Error("Failed to get user",
+			zap.String("user_id", authCode.UserID),
+			zap.Error(err))
+		return nil, fmt.Errorf("failed to get user: %w", err)
+	}
 
 	// Generate token pair
-	infraTokenPair, err := s.jwtService.GenerateTokenPair(id, scopes)
+	infraTokenPair, err := s.jwtService.GenerateTokenPair(user.ID, user.Roles)
 	if err != nil {
-		return nil, err
+		s.logger.Error("Failed to generate token pair",
+			zap.Error(err))
+		return nil, fmt.Errorf("failed to generate token pair: %w", err)
 	}
 
+	// Delete used authorization code
+	if err := s.oauthRepo.DeleteAuthorizationCode(ctx, code); err != nil {
+		s.logger.Error("Failed to delete authorization code",
+			zap.Error(err))
+		// Don't return error here, as the tokens were already generated
+	}
+
+	// Convert infrastructure token pair to domain token pair
 	tokenPair := &domain.TokenPair{
 		AccessToken:  infraTokenPair.AccessToken,
 		RefreshToken: infraTokenPair.RefreshToken,
@@ -109,21 +168,43 @@ func (s *OIDCService) ExchangeCode(ctx context.Context, code string) (*domain.To
 }
 
 func (s *OIDCService) RefreshToken(ctx context.Context, refreshToken string) (*domain.TokenPair, error) {
-	// Validate the refresh token and get user info
-	// This is a simplified implementation
-	id, err := ulid.Parse("01HXSAXHRYPHM8ZP5STF47CFP8") // Example user ID
+	s.logger.Debug("Refreshing token")
+
+	// Validate refresh token
+	claims, err := s.jwtService.ValidateToken(refreshToken)
 	if err != nil {
-		return nil, err
+		s.logger.Error("Failed to validate refresh token",
+			zap.Error(err))
+		return nil, domain.ErrInvalidCredentials
 	}
 
-	scopes := []string{"openid", "profile"}
+	// Parse user ID
+	userID, err := ulid.Parse(claims.Subject)
+	if err != nil {
+		s.logger.Error("Failed to parse user ID",
+			zap.String("user_id", claims.Subject),
+			zap.Error(err))
+		return nil, fmt.Errorf("invalid user ID: %w", err)
+	}
+
+	// Get user from repository
+	user, err := s.userRepo.FindByID(ctx, userID)
+	if err != nil {
+		s.logger.Error("Failed to get user",
+			zap.String("user_id", claims.Subject),
+			zap.Error(err))
+		return nil, fmt.Errorf("failed to get user: %w", err)
+	}
 
 	// Generate new token pair
-	infraTokenPair, err := s.jwtService.GenerateTokenPair(id, scopes)
+	infraTokenPair, err := s.jwtService.GenerateTokenPair(user.ID, user.Roles)
 	if err != nil {
-		return nil, err
+		s.logger.Error("Failed to generate token pair",
+			zap.Error(err))
+		return nil, fmt.Errorf("failed to generate token pair: %w", err)
 	}
 
+	// Convert infrastructure token pair to domain token pair
 	tokenPair := &domain.TokenPair{
 		AccessToken:  infraTokenPair.AccessToken,
 		RefreshToken: infraTokenPair.RefreshToken,
@@ -133,28 +214,85 @@ func (s *OIDCService) RefreshToken(ctx context.Context, refreshToken string) (*d
 }
 
 func (s *OIDCService) Authorize(ctx context.Context, clientID, redirectURI, state, scope string) (string, error) {
-	// Validate client and redirect URI
-	// This is a simplified implementation
-	if clientID != "client123" || redirectURI != "http://example.com/callback" {
+	s.logger.Debug("Authorizing client",
+		zap.String("client_id", clientID),
+		zap.String("redirect_uri", redirectURI))
+
+	// Validate client
+	client, err := s.oauthRepo.FindClientByID(ctx, clientID)
+	if err != nil {
+		s.logger.Error("Failed to find client",
+			zap.String("client_id", clientID),
+			zap.Error(err))
 		return "", domain.ErrInvalidClient
 	}
 
+	// Check if redirect URI is allowed
+	validURI := false
+	for _, uri := range client.RedirectURIs {
+		if uri == redirectURI {
+			validURI = true
+			break
+		}
+	}
+	if !validURI {
+		s.logger.Error("Invalid redirect URI",
+			zap.String("redirect_uri", redirectURI))
+		return "", domain.ErrInvalidClient
+	}
+
+	// Validate scope
+	if scope != "" {
+		validScope := false
+		for _, allowedScope := range client.Scopes {
+			if scope == allowedScope {
+				validScope = true
+				break
+			}
+		}
+		if !validScope {
+			s.logger.Error("Invalid scope",
+				zap.String("scope", scope))
+			return "", domain.ErrInvalidScope
+		}
+	}
+
+	// Get user ID from context (set by auth middleware)
+	userID, ok := ctx.Value("sub").(string)
+	if !ok || userID == "" {
+		s.logger.Error("Failed to get user ID from context")
+		return "", domain.ErrInvalidCredentials
+	}
+
 	// Generate authorization code
-	// In a real implementation, this would be stored and associated with the user
-	code := "auth_code_123"
+	code := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+	authCode := &domain.AuthorizationCode{
+		Code:      code,
+		ClientID:  clientID,
+		UserID:    userID,
+		Scopes:    []string{scope},
+		ExpiresAt: time.Now().Add(10 * time.Minute),
+		CreatedAt: time.Now(),
+	}
+
+	// Store authorization code
+	if err := s.oauthRepo.CreateAuthorizationCode(ctx, authCode); err != nil {
+		s.logger.Error("Failed to create authorization code",
+			zap.Error(err))
+		return "", fmt.Errorf("failed to create authorization code: %w", err)
+	}
 
 	return code, nil
 }
 
-// Helper function to convert RSA public key to JWK format
-func (s *OIDCService) convertToJWK(key *rsa.PublicKey) (map[string]interface{}, error) {
-	// Convert the public key to JWK format
-	nBytes, err := json.Marshal(key.N.Bytes())
+func (s *OIDCService) convertToJWK(publicKey *rsa.PublicKey) (map[string]interface{}, error) {
+	// Convert public key to JWK format
+	nBytes, err := json.Marshal(publicKey.N.Bytes())
 	if err != nil {
 		return nil, err
 	}
 
-	eBytes, err := json.Marshal(key.E)
+	eBytes, err := json.Marshal(publicKey.E)
 	if err != nil {
 		return nil, err
 	}

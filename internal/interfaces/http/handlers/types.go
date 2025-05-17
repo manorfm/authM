@@ -5,9 +5,10 @@ type TokenRequest struct {
 	GrantType    string `json:"grant_type"`
 	Code         string `json:"code"`
 	RefreshToken string `json:"refresh_token"`
-	RedirectURI  string `json:"redirect_uri"`
 	ClientID     string `json:"client_id"`
 	ClientSecret string `json:"client_secret"`
+	RedirectURI  string `json:"redirect_uri"`
+	CodeVerifier string `json:"code_verifier"`
 }
 
 // TokenResponse represents the token response structure

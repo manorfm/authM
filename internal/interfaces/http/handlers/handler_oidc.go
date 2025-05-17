@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 
 	"github.com/ipede/user-manager-service/internal/domain"
 	httperrors "github.com/ipede/user-manager-service/internal/interfaces/http/errors"
@@ -10,14 +11,14 @@ import (
 )
 
 type OIDCHandler struct {
-	service domain.OIDCService
-	logger  *zap.Logger
+	oidcService domain.OIDCService
+	logger      *zap.Logger
 }
 
-func NewOIDCHandler(service domain.OIDCService, logger *zap.Logger) *OIDCHandler {
+func NewOIDCHandler(oidcService domain.OIDCService, logger *zap.Logger) *OIDCHandler {
 	return &OIDCHandler{
-		service: service,
-		logger:  logger,
+		oidcService: oidcService,
+		logger:      logger,
 	}
 }
 
@@ -35,7 +36,7 @@ func (h *OIDCHandler) GetUserInfoHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	userInfo, err := h.service.GetUserInfo(r.Context(), userID)
+	userInfo, err := h.oidcService.GetUserInfo(r.Context(), userID)
 	if err != nil {
 		h.logger.Error("Failed to get user info", zap.Error(err))
 		httperrors.RespondWithError(w, httperrors.ErrCodeInternal, "Failed to get user info", nil, http.StatusInternalServerError)
@@ -57,7 +58,7 @@ func (h *OIDCHandler) GetUserInfoHandler(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *OIDCHandler) GetJWKSHandler(w http.ResponseWriter, r *http.Request) {
-	jwks, err := h.service.GetJWKS(r.Context())
+	jwks, err := h.oidcService.GetJWKS(r.Context())
 	if err != nil {
 		h.logger.Error("Failed to get JWKS", zap.Error(err))
 		httperrors.RespondWithError(w, httperrors.ErrCodeInternal, "Failed to get JWKS", nil, http.StatusInternalServerError)
@@ -79,28 +80,16 @@ func (h *OIDCHandler) GetJWKSHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *OIDCHandler) GetOpenIDConfigurationHandler(w http.ResponseWriter, r *http.Request) {
-	config, err := h.service.GetOpenIDConfiguration(r.Context())
+	config, err := h.oidcService.GetOpenIDConfiguration(r.Context())
 	if err != nil {
 		h.logger.Error("Failed to get OpenID configuration",
-			zap.Error(err),
-			zap.String("path", r.URL.Path),
-			zap.String("method", r.Method),
-		)
-
-		if err == domain.ErrInternal {
-			httperrors.RespondWithError(w, httperrors.ErrCodeInternal, "Failed to get OpenID configuration", nil, http.StatusInternalServerError)
-			return
-		}
-
+			zap.Error(err))
 		httperrors.RespondWithError(w, httperrors.ErrCodeInternal, "Failed to get OpenID configuration", nil, http.StatusInternalServerError)
 		return
 	}
 
 	if config == nil {
-		h.logger.Error("OpenID configuration is nil",
-			zap.String("path", r.URL.Path),
-			zap.String("method", r.Method),
-		)
+		h.logger.Error("OpenID configuration is nil")
 		httperrors.RespondWithError(w, httperrors.ErrCodeInternal, "Failed to get OpenID configuration", nil, http.StatusInternalServerError)
 		return
 	}
@@ -108,10 +97,7 @@ func (h *OIDCHandler) GetOpenIDConfigurationHandler(w http.ResponseWriter, r *ht
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(config); err != nil {
 		h.logger.Error("Failed to encode OpenID configuration response",
-			zap.Error(err),
-			zap.String("path", r.URL.Path),
-			zap.String("method", r.Method),
-		)
+			zap.Error(err))
 		httperrors.RespondWithError(w, httperrors.ErrCodeInternal, "Failed to encode OpenID configuration response", nil, http.StatusInternalServerError)
 		return
 	}
@@ -121,42 +107,50 @@ func (h *OIDCHandler) TokenHandler(w http.ResponseWriter, r *http.Request) {
 	var req TokenRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.logger.Error("Failed to decode request body", zap.Error(err))
+		h.logger.Error("Failed to decode request body",
+			zap.Error(err))
 		httperrors.RespondWithError(w, httperrors.ErrCodeInvalidRequest, "Invalid request body", nil, http.StatusBadRequest)
 		return
 	}
 
 	h.logger.Debug("Received token request",
 		zap.String("grant_type", req.GrantType),
-		zap.String("code", req.Code),
-		zap.String("client_id", req.ClientID))
+		zap.String("client_id", req.ClientID),
+		zap.String("redirect_uri", req.RedirectURI))
 
-	var tokens *domain.TokenPair
+	// Validate client credentials
+	if req.ClientID == "" || req.ClientSecret == "" {
+		h.logger.Error("Missing client credentials",
+			zap.String("client_id", req.ClientID))
+		httperrors.RespondWithError(w, httperrors.ErrCodeValidation, "Missing client credentials", nil, http.StatusBadRequest)
+		return
+	}
+
+	var tokenPair *domain.TokenPair
 	var err error
 
 	switch req.GrantType {
 	case "authorization_code":
 		if req.Code == "" {
-			details := []httperrors.ErrorDetail{
-				{
-					Field:   "code",
-					Message: "Authorization code is required",
-				},
-			}
-			httperrors.RespondWithError(w, httperrors.ErrCodeValidation, "Validation failed", details, http.StatusBadRequest)
+			h.logger.Error("Missing authorization code")
+			httperrors.RespondWithError(w, httperrors.ErrCodeValidation, "Missing authorization code", nil, http.StatusBadRequest)
 			return
 		}
-		if req.ClientID == "" || req.ClientSecret == "" {
-			details := []httperrors.ErrorDetail{
-				{
-					Field:   "client_id",
-					Message: "Client credentials are required",
-				},
-			}
-			httperrors.RespondWithError(w, httperrors.ErrCodeValidation, "Validation failed", details, http.StatusBadRequest)
+
+		if req.RedirectURI == "" {
+			h.logger.Error("Missing redirect URI")
+			httperrors.RespondWithError(w, httperrors.ErrCodeValidation, "Missing redirect URI", nil, http.StatusBadRequest)
 			return
 		}
-		tokens, err = h.service.ExchangeCode(r.Context(), req.Code)
+
+		// TODO: Implement PKCE validation
+		if req.CodeVerifier == "" {
+			h.logger.Warn("PKCE not implemented, code_verifier is required")
+			httperrors.RespondWithError(w, httperrors.ErrCodeInvalidRequest, "PKCE is required", nil, http.StatusBadRequest)
+			return
+		}
+
+		tokenPair, err = h.oidcService.ExchangeCode(r.Context(), req.Code)
 		if err != nil {
 			h.logger.Error("ExchangeCode failed", zap.Error(err))
 			switch err {
@@ -169,18 +163,15 @@ func (h *OIDCHandler) TokenHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
+
 	case "refresh_token":
 		if req.RefreshToken == "" {
-			details := []httperrors.ErrorDetail{
-				{
-					Field:   "refresh_token",
-					Message: "Refresh token is required",
-				},
-			}
-			httperrors.RespondWithError(w, httperrors.ErrCodeValidation, "Validation failed", details, http.StatusBadRequest)
+			h.logger.Error("Missing refresh token")
+			httperrors.RespondWithError(w, httperrors.ErrCodeValidation, "Missing refresh token", nil, http.StatusBadRequest)
 			return
 		}
-		tokens, err = h.service.RefreshToken(r.Context(), req.RefreshToken)
+
+		tokenPair, err = h.oidcService.RefreshToken(r.Context(), req.RefreshToken)
 		if err != nil {
 			h.logger.Error("RefreshToken failed", zap.Error(err))
 			switch err {
@@ -191,25 +182,25 @@ func (h *OIDCHandler) TokenHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
+
 	default:
-		details := []httperrors.ErrorDetail{
-			{
-				Field:   "grant_type",
-				Message: "Unsupported grant type",
-			},
-		}
-		httperrors.RespondWithError(w, httperrors.ErrCodeInvalidRequest, "Unsupported grant type", details, http.StatusBadRequest)
+		h.logger.Error("Unsupported grant type",
+			zap.String("grant_type", req.GrantType))
+		httperrors.RespondWithError(w, httperrors.ErrCodeInvalidRequest, "Unsupported grant type", nil, http.StatusBadRequest)
 		return
 	}
 
-	if tokens == nil {
+	if tokenPair == nil {
 		h.logger.Error("Token exchange returned nil tokens")
 		httperrors.RespondWithError(w, httperrors.ErrCodeInternal, "Token exchange failed", nil, http.StatusInternalServerError)
 		return
 	}
 
+	h.logger.Debug("Token exchange successful",
+		zap.String("grant_type", req.GrantType))
+
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(tokens); err != nil {
+	if err := json.NewEncoder(w).Encode(tokenPair); err != nil {
 		h.logger.Error("Failed to encode response", zap.Error(err))
 		httperrors.RespondWithError(w, httperrors.ErrCodeInternal, "Failed to encode response", nil, http.StatusInternalServerError)
 		return
@@ -217,11 +208,21 @@ func (h *OIDCHandler) TokenHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *OIDCHandler) AuthorizeHandler(w http.ResponseWriter, r *http.Request) {
+	// Get query parameters
 	clientID := r.URL.Query().Get("client_id")
 	redirectURI := r.URL.Query().Get("redirect_uri")
 	state := r.URL.Query().Get("state")
 	scope := r.URL.Query().Get("scope")
+	responseType := r.URL.Query().Get("response_type")
 
+	h.logger.Debug("Received authorization request",
+		zap.String("client_id", clientID),
+		zap.String("redirect_uri", redirectURI),
+		zap.String("state", state),
+		zap.String("scope", scope),
+		zap.String("response_type", responseType))
+
+	// Validate required parameters
 	if clientID == "" || redirectURI == "" {
 		details := []httperrors.ErrorDetail{
 			{
@@ -237,17 +238,57 @@ func (h *OIDCHandler) AuthorizeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	code, err := h.service.Authorize(r.Context(), clientID, redirectURI, state, scope)
+	// Validate response_type
+	if responseType != "code" {
+		h.logger.Error("Unsupported response type",
+			zap.String("response_type", responseType))
+		httperrors.RespondWithError(w, httperrors.ErrCodeInvalidRequest, "Unsupported response type", nil, http.StatusBadRequest)
+		return
+	}
+
+	// Get user ID from context (set by auth middleware)
+	userID, ok := r.Context().Value("sub").(string)
+	if !ok || userID == "" {
+		h.logger.Error("User not authenticated")
+		httperrors.RespondWithError(w, httperrors.ErrCodeAuthentication, "User not authenticated", nil, http.StatusUnauthorized)
+		return
+	}
+
+	// Generate authorization code
+	code, err := h.oidcService.Authorize(r.Context(), clientID, redirectURI, state, scope)
 	if err != nil {
 		h.logger.Error("Authorization failed", zap.Error(err))
 		switch err {
 		case domain.ErrInvalidClient:
 			httperrors.RespondWithError(w, httperrors.ErrCodeAuthentication, "Invalid client", nil, http.StatusBadRequest)
+		case domain.ErrInvalidCredentials:
+			httperrors.RespondWithError(w, httperrors.ErrCodeAuthentication, "User not authenticated", nil, http.StatusUnauthorized)
 		default:
 			httperrors.RespondWithError(w, httperrors.ErrCodeInternal, "Authorization failed", nil, http.StatusInternalServerError)
 		}
 		return
 	}
 
-	http.Redirect(w, r, redirectURI+"?code="+code+"&state="+state, http.StatusFound)
+	// Parse and validate redirect URI
+	redirectURL, err := url.Parse(redirectURI)
+	if err != nil {
+		h.logger.Error("Failed to parse redirect URI",
+			zap.String("redirect_uri", redirectURI),
+			zap.Error(err))
+		httperrors.RespondWithError(w, httperrors.ErrCodeInvalidRequest, "Invalid redirect URI", nil, http.StatusBadRequest)
+		return
+	}
+
+	// Add authorization code and state to redirect URL
+	q := redirectURL.Query()
+	q.Set("code", code)
+	if state != "" {
+		q.Set("state", state)
+	}
+	redirectURL.RawQuery = q.Encode()
+
+	h.logger.Debug("Redirecting to client",
+		zap.String("redirect_uri", redirectURL.String()))
+
+	http.Redirect(w, r, redirectURL.String(), http.StatusFound)
 }

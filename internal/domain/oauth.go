@@ -7,13 +7,23 @@ import (
 
 // OAuth2Client represents a registered OAuth2 client
 type OAuth2Client struct {
-	ID           string
-	Secret       string
-	RedirectURIs []string
-	GrantTypes   []string
-	Scopes       []string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ID           string    `json:"id"`
+	Secret       string    `json:"secret"`
+	RedirectURIs []string  `json:"redirect_uris"`
+	GrantTypes   []string  `json:"grant_types"`
+	Scopes       []string  `json:"scopes"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+// AuthorizationCode represents an OAuth2 authorization code
+type AuthorizationCode struct {
+	Code      string    `json:"code"`
+	ClientID  string    `json:"client_id"`
+	UserID    string    `json:"user_id"`
+	Scopes    []string  `json:"scopes"`
+	ExpiresAt time.Time `json:"expires_at"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // OAuth2Service defines the interface for OAuth2 operations

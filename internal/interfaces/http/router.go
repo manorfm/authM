@@ -27,9 +27,10 @@ func NewRouter(
 ) *Router {
 	authMiddleware := auth.NewAuthMiddleware(jwt, logger)
 	userRepo := repository.NewUserRepository(db)
+	oauthRepo := repository.NewOAuth2Repository(db, logger)
 	userService := application.NewUserService(userRepo, logger)
 	authService := application.NewAuthService(userRepo, jwt, logger)
-	oidcService := application.NewOIDCService(authService, jwt, userRepo)
+	oidcService := application.NewOIDCService(authService, jwt, userRepo, oauthRepo, logger)
 
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(authService, logger)

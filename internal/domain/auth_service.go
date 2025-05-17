@@ -2,7 +2,6 @@ package domain
 
 import (
 	"context"
-	"errors"
 )
 
 // UserService defines the interface for user operations
@@ -12,5 +11,3 @@ type AuthService interface {
 	// Login authenticates a user and returns a token pair
 	Login(ctx context.Context, email, password string) (*TokenPair, error)
 }
-
-var ErrUserAlreadyExists = errors.New("user already exists")
