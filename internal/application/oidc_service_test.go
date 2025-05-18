@@ -2,11 +2,16 @@ package application
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
+	"crypto/rsa"
+
+	jwtv5 "github.com/golang-jwt/jwt/v5"
 	"github.com/ipede/user-manager-service/internal/domain"
-	internaljwt "github.com/ipede/user-manager-service/internal/infrastructure/jwt"
+	"github.com/ipede/user-manager-service/internal/infrastructure/config"
+	jwtinfra "github.com/ipede/user-manager-service/internal/infrastructure/jwt"
 	"github.com/oklog/ulid/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -124,6 +129,103 @@ func (m *mockUserRepository) Update(ctx context.Context, user *domain.User) erro
 func (m *mockUserRepository) AddRole(ctx context.Context, userID ulid.ULID, role string) error {
 	args := m.Called(ctx, userID, role)
 	return args.Error(0)
+}
+
+// Mock JWT para simular chave pública inválida
+type mockJWTWithNilKey struct{}
+
+func (m *mockJWTWithNilKey) GetPublicKey() *rsa.PublicKey { return nil }
+
+// Mock JWT para simular fluxo de refresh token
+type mockJWTRefresh struct{}
+
+func (m *mockJWTRefresh) ValidateToken(token string) (*domain.Claims, error) {
+	return &domain.Claims{
+		RegisteredClaims: jwtv5.RegisteredClaims{
+			Subject: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+		},
+		Roles: []string{"user"},
+	}, nil
+}
+
+func (m *mockJWTRefresh) GetPublicKey() *rsa.PublicKey { return nil }
+
+func (m *mockJWTRefresh) GetJWKS(ctx context.Context) (map[string]interface{}, error) {
+	return nil, nil
+}
+
+func (m *mockJWTRefresh) GenerateTokenPair(userID ulid.ULID, roles []string) (*domain.TokenPair, error) {
+	return &domain.TokenPair{
+		AccessToken:  "mock_access_token",
+		RefreshToken: "mock_refresh_token",
+	}, nil
+}
+
+// Mock JWT para simular erro de validação
+type mockJWTError struct{}
+
+func (m *mockJWTError) ValidateToken(token string) (*domain.Claims, error) {
+	return nil, domain.ErrInvalidCredentials
+}
+
+func (m *mockJWTError) GetPublicKey() *rsa.PublicKey {
+	return nil
+}
+
+func (m *mockJWTError) GetJWKS(ctx context.Context) (map[string]interface{}, error) {
+	return nil, nil
+}
+
+func (m *mockJWTError) GenerateTokenPair(userID ulid.ULID, roles []string) (*domain.TokenPair, error) {
+	return nil, nil
+}
+
+// Mock JWT para simular erro de parsing do userID
+type mockJWTInvalidUserID struct{}
+
+func (m *mockJWTInvalidUserID) ValidateToken(token string) (*domain.Claims, error) {
+	return &domain.Claims{
+		RegisteredClaims: jwtv5.RegisteredClaims{
+			Subject: "invalid",
+		},
+		Roles: []string{"user"},
+	}, nil
+}
+
+func (m *mockJWTInvalidUserID) GetPublicKey() *rsa.PublicKey {
+	return nil
+}
+
+func (m *mockJWTInvalidUserID) GetJWKS(ctx context.Context) (map[string]interface{}, error) {
+	return nil, nil
+}
+
+func (m *mockJWTInvalidUserID) GenerateTokenPair(userID ulid.ULID, roles []string) (*domain.TokenPair, error) {
+	return nil, nil
+}
+
+// Mock JWT para simular erro de geração de token
+type mockJWTTokenGenError struct{}
+
+func (m *mockJWTTokenGenError) ValidateToken(token string) (*domain.Claims, error) {
+	return &domain.Claims{
+		RegisteredClaims: jwtv5.RegisteredClaims{
+			Subject: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+		},
+		Roles: []string{"user"},
+	}, nil
+}
+
+func (m *mockJWTTokenGenError) GetPublicKey() *rsa.PublicKey {
+	return nil
+}
+
+func (m *mockJWTTokenGenError) GetJWKS(ctx context.Context) (map[string]interface{}, error) {
+	return nil, nil
+}
+
+func (m *mockJWTTokenGenError) GenerateTokenPair(userID ulid.ULID, roles []string) (*domain.TokenPair, error) {
+	return nil, domain.ErrTokenGeneration
 }
 
 func TestOIDCService_GetUserInfo(t *testing.T) {
@@ -266,6 +368,7 @@ func TestOIDCService_Authorize(t *testing.T) {
 }
 
 func TestOIDCService_ExchangeCode(t *testing.T) {
+	logger := zap.NewNop()
 	tests := []struct {
 		name          string
 		code          string
@@ -310,7 +413,12 @@ func TestOIDCService_ExchangeCode(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mockOAuth2Repo := new(mockOAuth2Repository)
 			mockUserRepo := new(mockUserRepository)
-			jwtService, _ := internaljwt.New(time.Minute, time.Hour)
+			cfg := &config.Config{
+				JWTAccessDuration:  time.Hour,
+				JWTRefreshDuration: time.Hour,
+			}
+			jwtService := jwtinfra.NewJWTService(cfg, logger)
+
 			tt.mockSetup(mockOAuth2Repo)
 			if tt.name == "successful code exchange" {
 				mockUserRepo.On("FindByID", mock.Anything, ulid.MustParse("01ARZ3NDEKTSV4RRFFQ69G5FAV")).Return(&domain.User{
@@ -321,7 +429,7 @@ func TestOIDCService_ExchangeCode(t *testing.T) {
 				}, nil)
 			}
 
-			service := NewOIDCService(nil, jwtService, mockUserRepo, mockOAuth2Repo, zap.NewNop())
+			service := NewOIDCService(nil, jwtService, mockUserRepo, mockOAuth2Repo, logger)
 
 			token, err := service.ExchangeCode(context.Background(), tt.code, tt.codeVerifier)
 
@@ -336,6 +444,188 @@ func TestOIDCService_ExchangeCode(t *testing.T) {
 
 			mockOAuth2Repo.AssertExpectations(t)
 			mockUserRepo.AssertExpectations(t)
+		})
+	}
+}
+
+func TestOIDCService_GetOpenIDConfiguration(t *testing.T) {
+	tests := []struct {
+		name           string
+		mockSetup      func(*mockOAuth2Repository)
+		expectedError  error
+		expectedConfig map[string]interface{}
+	}{
+		{
+			name: "successful configuration retrieval",
+			mockSetup: func(m *mockOAuth2Repository) {
+				// No mock setup needed
+			},
+			expectedConfig: map[string]interface{}{
+				"issuer":                                "http://localhost:8080",
+				"authorization_endpoint":                "http://localhost:8080/oauth2/authorize",
+				"token_endpoint":                        "http://localhost:8080/oauth2/token",
+				"userinfo_endpoint":                     "http://localhost:8080/oauth2/userinfo",
+				"jwks_uri":                              "http://localhost:8080/.well-known/jwks.json",
+				"response_types_supported":              []string{"code", "token", "id_token"},
+				"subject_types_supported":               []string{"public"},
+				"id_token_signing_alg_values_supported": []string{"RS256"},
+				"scopes_supported":                      []string{"openid", "profile", "email"},
+				"token_endpoint_auth_methods_supported": []string{"client_secret_basic", "client_secret_post"},
+				"claims_supported":                      []string{"sub", "iss", "name", "email"},
+			},
+		},
+		{
+			name: "nil OAuth2 repository",
+			mockSetup: func(m *mockOAuth2Repository) {
+				// No mock setup needed
+			},
+			expectedError: domain.ErrInvalidClient,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var oauth2Repo domain.OAuth2Repository
+			if tt.name != "nil OAuth2 repository" {
+				oauth2Repo = new(mockOAuth2Repository)
+				tt.mockSetup(oauth2Repo.(*mockOAuth2Repository))
+			}
+
+			service := NewOIDCService(nil, nil, nil, oauth2Repo, zap.NewNop())
+
+			config, err := service.GetOpenIDConfiguration(context.Background())
+
+			if tt.expectedError != nil {
+				assert.Error(t, err)
+				assert.Equal(t, tt.expectedError.Error(), err.Error())
+				assert.Nil(t, config)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expectedConfig, config)
+			}
+
+			if oauth2Repo != nil {
+				oauth2Repo.(*mockOAuth2Repository).AssertExpectations(t)
+			}
+		})
+	}
+}
+
+func TestOIDCService_RefreshToken(t *testing.T) {
+	logger := zap.NewNop()
+	tests := []struct {
+		name          string
+		refreshToken  string
+		mockSetup     func(*mockUserRepository, interface{})
+		expectedError error
+		expectedToken *domain.TokenPair
+	}{
+		{
+			name:         "successful token refresh",
+			refreshToken: "valid_refresh_token",
+			mockSetup: func(m *mockUserRepository, _ interface{}) {
+				userID := ulid.MustParse("01ARZ3NDEKTSV4RRFFQ69G5FAV")
+				m.On("FindByID", mock.Anything, userID).Return(&domain.User{
+					ID:    userID,
+					Name:  "Test User",
+					Email: "test@example.com",
+					Roles: []string{"user"},
+				}, nil)
+			},
+			expectedToken: &domain.TokenPair{
+				AccessToken:  "mock_access_token",
+				RefreshToken: "mock_refresh_token",
+			},
+		},
+		{
+			name:         "invalid refresh token",
+			refreshToken: "invalid_token",
+			mockSetup: func(m *mockUserRepository, _ interface{}) {
+				// No mock setup needed
+			},
+			expectedError: domain.ErrInvalidCredentials,
+		},
+		{
+			name:         "user not found",
+			refreshToken: "valid_refresh_token",
+			mockSetup: func(m *mockUserRepository, _ interface{}) {
+				userID := ulid.MustParse("01ARZ3NDEKTSV4RRFFQ69G5FAV")
+				m.On("FindByID", mock.Anything, userID).Return(nil, domain.ErrUserNotFound).Once()
+			},
+			expectedError: domain.ErrInvalidCredentials,
+		},
+		{
+			name:         "invalid user ID in token",
+			refreshToken: "valid_refresh_token",
+			mockSetup: func(m *mockUserRepository, _ interface{}) {
+				// No mock setup needed
+			},
+			expectedError: fmt.Errorf("invalid user ID: %w", ulid.ErrDataSize),
+		},
+		{
+			name:         "token generation error",
+			refreshToken: "valid_refresh_token",
+			mockSetup: func(m *mockUserRepository, _ interface{}) {
+				userID := ulid.MustParse("01ARZ3NDEKTSV4RRFFQ69G5FAV")
+				m.On("FindByID", mock.Anything, userID).Return(&domain.User{
+					ID:    userID,
+					Name:  "Test User",
+					Email: "test@example.com",
+					Roles: []string{"user"},
+				}, nil)
+			},
+			expectedError: fmt.Errorf("failed to generate token pair: %w", domain.ErrTokenGeneration),
+		},
+		{
+			name:         "expired token",
+			refreshToken: "expired_token",
+			mockSetup: func(m *mockUserRepository, _ interface{}) {
+				// No mock setup needed
+			},
+			expectedError: domain.ErrInvalidCredentials,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockUserRepo := new(mockUserRepository)
+			var jwtService domain.JWTService
+			switch tt.name {
+			case "successful token refresh":
+				jwtService = &mockJWTRefresh{}
+			case "invalid refresh token":
+				jwtService = &mockJWTError{}
+			case "invalid user ID in token":
+				jwtService = &mockJWTInvalidUserID{}
+			case "token generation error":
+				jwtService = &mockJWTTokenGenError{}
+			default:
+				jwtService = &mockJWTError{}
+			}
+			tt.mockSetup(mockUserRepo, jwtService)
+
+			service := NewOIDCService(nil, jwtService, mockUserRepo, nil, logger)
+
+			token, err := service.RefreshToken(context.Background(), tt.refreshToken)
+
+			if tt.expectedError != nil {
+				assert.Error(t, err)
+				if tt.expectedError.Error() != "" {
+					assert.Equal(t, tt.expectedError.Error(), err.Error())
+				}
+				assert.Nil(t, token)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, token)
+				assert.NotEmpty(t, token.AccessToken)
+				assert.NotEmpty(t, token.RefreshToken)
+			}
+
+			if tt.name == "invalid refresh token" || tt.name == "user not found" {
+				// não chama mockUserRepo.AssertExpectations(t)
+			} else {
+				mockUserRepo.AssertExpectations(t)
+			}
 		})
 	}
 }

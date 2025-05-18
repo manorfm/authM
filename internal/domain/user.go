@@ -25,12 +25,6 @@ type User struct {
 	DeletedAt *time.Time `json:"deleted_at,omitempty"`
 }
 
-// LoginResponse represents the response for a login request
-type LoginResponse struct {
-	User  *User      `json:"user"`
-	Token *TokenPair `json:"token"`
-}
-
 // CreateUserRequest represents the request to create a new user
 type CreateUserRequest struct {
 	Name     string `json:"name" validate:"required"`
@@ -49,17 +43,6 @@ type UpdateUserRequest struct {
 type LoginRequest struct {
 	Email    string `json:"email" validate:"required,email"`
 	Password string `json:"password" validate:"required"`
-}
-
-// RefreshTokenRequest represents the request to refresh an access token
-type RefreshTokenRequest struct {
-	RefreshToken string `json:"refresh_token" validate:"required"`
-}
-
-// TokenPair represents a pair of access and refresh tokens
-type TokenPair struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
 }
 
 // NewUser creates a new user instance

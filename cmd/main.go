@@ -11,7 +11,6 @@ import (
 
 	"github.com/ipede/user-manager-service/internal/infrastructure/config"
 	"github.com/ipede/user-manager-service/internal/infrastructure/database"
-	"github.com/ipede/user-manager-service/internal/infrastructure/jwt"
 	httprouter "github.com/ipede/user-manager-service/internal/interfaces/http"
 	"go.uber.org/zap"
 )
@@ -48,17 +47,8 @@ func main() {
 	}
 	defer db.Close()
 
-	// Initialize services
-	jwtService, err := jwt.New(
-		cfg.JWTAccessDuration,
-		cfg.JWTRefreshDuration,
-	)
-	if err != nil {
-		logger.Fatal("Failed to initialize JWT service", zap.Error(err))
-	}
-
 	// Create router
-	router := httprouter.NewRouter(db, jwtService, logger)
+	router := httprouter.NewRouter(db, cfg, logger)
 
 	// Start server
 	server := &http.Server{

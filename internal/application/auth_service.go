@@ -6,23 +6,22 @@ import (
 	"time"
 
 	"github.com/ipede/user-manager-service/internal/domain"
-	"github.com/ipede/user-manager-service/internal/infrastructure/jwt"
 	"github.com/ipede/user-manager-service/internal/infrastructure/password"
 	"github.com/oklog/ulid/v2"
 	"go.uber.org/zap"
 )
 
 type AuthService struct {
-	userRepo domain.UserRepository
-	jwt      *jwt.JWT
-	logger   *zap.Logger
+	userRepo   domain.UserRepository
+	jwtService domain.JWTService
+	logger     *zap.Logger
 }
 
-func NewAuthService(userRepo domain.UserRepository, jwt *jwt.JWT, logger *zap.Logger) *AuthService {
+func NewAuthService(userRepo domain.UserRepository, jwtService domain.JWTService, logger *zap.Logger) *AuthService {
 	return &AuthService{
-		userRepo: userRepo,
-		jwt:      jwt,
-		logger:   logger,
+		userRepo:   userRepo,
+		jwtService: jwtService,
+		logger:     logger,
 	}
 }
 
@@ -67,7 +66,10 @@ func (s *AuthService) Register(ctx context.Context, name, email, passwordStr, ph
 func (s *AuthService) Login(ctx context.Context, email, passwordStr string) (*domain.TokenPair, error) {
 	user, err := s.userRepo.FindByEmail(ctx, email)
 	if err != nil {
-		return nil, domain.ErrUserNotFound
+		if err == domain.ErrUserNotFound {
+			return nil, domain.ErrInvalidCredentials
+		}
+		return nil, err
 	}
 
 	err = password.CheckPassword(passwordStr, user.Password)
@@ -75,14 +77,9 @@ func (s *AuthService) Login(ctx context.Context, email, passwordStr string) (*do
 		return nil, domain.ErrInvalidCredentials
 	}
 
-	infraTokenPair, err := s.jwt.GenerateTokenPair(user.ID, user.Roles)
+	tokenPair, err := s.jwtService.GenerateTokenPair(user.ID, user.Roles)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate token: %w", err)
-	}
-
-	tokenPair := &domain.TokenPair{
-		AccessToken:  infraTokenPair.AccessToken,
-		RefreshToken: infraTokenPair.RefreshToken,
 	}
 
 	return tokenPair, nil

@@ -5,17 +5,17 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/ipede/user-manager-service/internal/infrastructure/jwt"
+	"github.com/ipede/user-manager-service/internal/domain"
 	httperrors "github.com/ipede/user-manager-service/internal/interfaces/http/errors"
 	"go.uber.org/zap"
 )
 
 type AuthMiddleware struct {
-	jwt    jwt.JWTValidator
+	jwt    domain.JWTService
 	logger *zap.Logger
 }
 
-func NewAuthMiddleware(jwt jwt.JWTValidator, logger *zap.Logger) *AuthMiddleware {
+func NewAuthMiddleware(jwt domain.JWTService, logger *zap.Logger) *AuthMiddleware {
 	return &AuthMiddleware{jwt: jwt, logger: logger}
 }
 

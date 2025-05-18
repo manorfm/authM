@@ -3,23 +3,20 @@ package application
 import (
 	"context"
 	"crypto/rand"
-	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/ipede/user-manager-service/internal/domain"
-	"github.com/ipede/user-manager-service/internal/infrastructure/jwt"
 	"github.com/oklog/ulid/v2"
 	"go.uber.org/zap"
 )
 
 type OIDCService struct {
 	authService domain.AuthService
-	jwtService  *jwt.JWT
+	jwtService  domain.JWTService
 	userRepo    domain.UserRepository
 	oauthRepo   domain.OAuth2Repository
 	logger      *zap.Logger
@@ -27,11 +24,11 @@ type OIDCService struct {
 
 func NewOIDCService(
 	authService domain.AuthService,
-	jwtService *jwt.JWT,
+	jwtService domain.JWTService,
 	userRepo domain.UserRepository,
 	oauthRepo domain.OAuth2Repository,
 	logger *zap.Logger,
-) domain.OIDCService {
+) *OIDCService {
 	return &OIDCService{
 		authService: authService,
 		jwtService:  jwtService,
@@ -69,31 +66,13 @@ func (s *OIDCService) GetUserInfo(ctx context.Context, userID string) (map[strin
 	}, nil
 }
 
-func (s *OIDCService) GetJWKS(ctx context.Context) (map[string]interface{}, error) {
-	s.logger.Debug("Getting JWKS")
-
-	// Get the public key from JWT service
-	publicKey := s.jwtService.GetPublicKey()
-	if publicKey == nil {
-		s.logger.Error("Failed to get public key")
-		return nil, domain.ErrInvalidClient
-	}
-
-	// Convert public key to JWK format
-	jwk, err := s.convertToJWK(publicKey)
-	if err != nil {
-		s.logger.Error("Failed to convert public key to JWK",
-			zap.Error(err))
-		return nil, err
-	}
-
-	return map[string]interface{}{
-		"keys": []map[string]interface{}{jwk},
-	}, nil
-}
-
 func (s *OIDCService) GetOpenIDConfiguration(ctx context.Context) (map[string]interface{}, error) {
 	s.logger.Debug("Getting OpenID configuration")
+
+	if s.oauthRepo == nil {
+		s.logger.Error("OAuth2 repository is nil")
+		return nil, domain.ErrInvalidClient
+	}
 
 	return map[string]interface{}{
 		"issuer":                                "http://localhost:8080",
@@ -210,6 +189,12 @@ func (s *OIDCService) RefreshToken(ctx context.Context, refreshToken string) (*d
 	if err != nil {
 		s.logger.Error("Failed to validate refresh token",
 			zap.Error(err))
+		return nil, domain.ErrInvalidCredentials
+	}
+
+	// claims pode ser nil se o mock retornar nil, garantir isso
+	if claims == nil {
+		s.logger.Error("Claims is nil after token validation")
 		return nil, domain.ErrInvalidCredentials
 	}
 
@@ -347,26 +332,4 @@ func splitAndTrim(s, sep string) []string {
 		}
 	}
 	return result
-}
-
-func (s *OIDCService) convertToJWK(publicKey *rsa.PublicKey) (map[string]interface{}, error) {
-	// Convert public key to JWK format
-	nBytes, err := json.Marshal(publicKey.N.Bytes())
-	if err != nil {
-		return nil, err
-	}
-
-	eBytes, err := json.Marshal(publicKey.E)
-	if err != nil {
-		return nil, err
-	}
-
-	return map[string]interface{}{
-		"kty": "RSA",
-		"use": "sig",
-		"kid": "1",
-		"alg": "RS256",
-		"n":   string(nBytes),
-		"e":   string(eBytes),
-	}, nil
 }

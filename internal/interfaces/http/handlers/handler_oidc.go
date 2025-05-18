@@ -13,12 +13,14 @@ import (
 
 type OIDCHandler struct {
 	oidcService domain.OIDCService
+	jwtService  domain.JWTService
 	logger      *zap.Logger
 }
 
-func NewOIDCHandler(oidcService domain.OIDCService, logger *zap.Logger) *OIDCHandler {
+func NewOIDCHandler(oidcService domain.OIDCService, jwtService domain.JWTService, logger *zap.Logger) *OIDCHandler {
 	return &OIDCHandler{
 		oidcService: oidcService,
+		jwtService:  jwtService,
 		logger:      logger,
 	}
 }
@@ -59,7 +61,7 @@ func (h *OIDCHandler) GetUserInfoHandler(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *OIDCHandler) GetJWKSHandler(w http.ResponseWriter, r *http.Request) {
-	jwks, err := h.oidcService.GetJWKS(r.Context())
+	jwks, err := h.jwtService.GetJWKS(r.Context())
 	if err != nil {
 		h.logger.Error("Failed to get JWKS", zap.Error(err))
 		httperrors.RespondWithError(w, httperrors.ErrCodeInternal, "Failed to get JWKS", nil, http.StatusInternalServerError)

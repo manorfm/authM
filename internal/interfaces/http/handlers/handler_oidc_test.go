@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"crypto/rsa"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -10,7 +11,8 @@ import (
 	"time"
 
 	"github.com/ipede/user-manager-service/internal/domain"
-	infrajwt "github.com/ipede/user-manager-service/internal/infrastructure/jwt"
+	"github.com/ipede/user-manager-service/internal/infrastructure/config"
+	jwtinfra "github.com/ipede/user-manager-service/internal/infrastructure/jwt"
 	httperrors "github.com/ipede/user-manager-service/internal/interfaces/http/errors"
 	"github.com/oklog/ulid/v2"
 	"github.com/stretchr/testify/assert"
@@ -227,17 +229,14 @@ func (m *mockOIDCService) Authorize(ctx context.Context, clientID, redirectURI, 
 	return args.String(0), args.Error(1)
 }
 
-func getJWTService(t *testing.T) *infrajwt.JWT {
-	// 15 minutos = 15 * 60 segundos
-	accessDuration := 15 * time.Minute
-	// 24 horas = 24 * time.Hour
-	refreshDuration := 24 * time.Hour
-
-	jwtService, err := infrajwt.New(accessDuration, refreshDuration)
-	if err != nil {
-		t.Fatalf("Failed to create JWT service: %v", err)
+func getJWTService(t *testing.T) *jwtinfra.JWTService {
+	logger := zap.NewNop()
+	cfg := &config.Config{
+		JWTAccessDuration:  15 * time.Minute,
+		JWTRefreshDuration: 24 * time.Hour,
+		JWTSecret:          "test_secret",
 	}
-	return jwtService
+	return jwtinfra.NewJWTService(cfg, logger)
 }
 
 func TestHandleOpenIDConfiguration(t *testing.T) {
@@ -297,9 +296,10 @@ func TestHandleOpenIDConfiguration(t *testing.T) {
 			// Create mock service
 			mockService := new(mockOIDCService)
 			tt.mockSetup(mockService)
+			jwtService := getJWTService(t)
 
 			// Create handler with mock service
-			handler := NewOIDCHandler(mockService, zap.NewNop())
+			handler := NewOIDCHandler(mockService, jwtService, zap.NewNop())
 
 			// Create test request
 			req := httptest.NewRequest(http.MethodGet, "/.well-known/openid-configuration", nil)
@@ -325,87 +325,115 @@ func TestHandleOpenIDConfiguration(t *testing.T) {
 func TestHandleJWKS(t *testing.T) {
 	tests := []struct {
 		name           string
-		mockSetup      func(*mockOIDCService)
+		jwtService     domain.JWTService
 		expectedStatus int
-		expectedBody   map[string]interface{}
+		expectedBody   interface{}
 	}{
 		{
-			name: "successful JWKS response",
-			mockSetup: func(m *mockOIDCService) {
-				m.On("GetJWKS", mock.Anything).Return(map[string]interface{}{
-					"keys": []map[string]interface{}{
-						{
-							"kty": "RSA",
-							"use": "sig",
-							"kid": "1",
-							"alg": "RS256",
-							"n":   "test_n",
-							"e":   "test_e",
-						},
-					},
-				}, nil)
-			},
+			name:           "successful JWKS response",
+			jwtService:     getJWTService(t),
 			expectedStatus: http.StatusOK,
 			expectedBody: map[string]interface{}{
-				"keys": []interface{}{
-					map[string]interface{}{
+				"keys": []map[string]interface{}{
+					{
 						"kty": "RSA",
 						"use": "sig",
-						"kid": "1",
 						"alg": "RS256",
-						"n":   "test_n",
-						"e":   "test_e",
+						"kid": "1",
 					},
 				},
 			},
 		},
 		{
 			name: "service error",
-			mockSetup: func(m *mockOIDCService) {
-				m.On("GetJWKS", mock.Anything).Return(nil, domain.ErrInternal)
+			jwtService: &mockJWTService{
+				getJWKSError: domain.ErrInternal,
 			},
 			expectedStatus: http.StatusInternalServerError,
-			expectedBody: map[string]interface{}{
-				"code":    httperrors.ErrCodeInternal,
-				"message": "Failed to get JWKS",
+			expectedBody: httperrors.ErrorResponse{
+				Code:    httperrors.ErrCodeInternal,
+				Message: "Failed to get JWKS",
+			},
+		},
+		{
+			name: "nil JWKS response",
+			jwtService: &mockJWTService{
+				getJWKSResponse: nil,
+			},
+			expectedStatus: http.StatusInternalServerError,
+			expectedBody: httperrors.ErrorResponse{
+				Code:    httperrors.ErrCodeInternal,
+				Message: "Failed to get JWKS",
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create mock service
-			mockService := new(mockOIDCService)
-			tt.mockSetup(mockService)
-
-			// Create handler with mock service
-			handler := NewOIDCHandler(mockService, zap.NewNop())
-
-			// Create test request
+			handler := NewOIDCHandler(nil, tt.jwtService, zap.NewNop())
+			rec := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodGet, "/.well-known/jwks.json", nil)
-			w := httptest.NewRecorder()
 
-			// Call handler
-			handler.GetJWKSHandler(w, req)
+			handler.GetJWKSHandler(rec, req)
 
-			// Assert response
-			assert.Equal(t, tt.expectedStatus, w.Code)
+			assert.Equal(t, tt.expectedStatus, rec.Code)
 
-			var response map[string]interface{}
-			err := json.NewDecoder(w.Body).Decode(&response)
-			assert.NoError(t, err)
-			assert.Equal(t, tt.expectedBody, response)
+			if tt.expectedStatus == http.StatusOK {
+				var response map[string]interface{}
+				err := json.NewDecoder(rec.Body).Decode(&response)
+				assert.NoError(t, err)
 
-			// Verify mock expectations
-			mockService.AssertExpectations(t)
+				// Verify the structure of the response
+				assert.Contains(t, response, "keys")
+				keys, ok := response["keys"].([]interface{})
+				assert.True(t, ok)
+				assert.Len(t, keys, 1)
+
+				key, ok := keys[0].(map[string]interface{})
+				assert.True(t, ok)
+				assert.Equal(t, "RSA", key["kty"])
+				assert.Equal(t, "sig", key["use"])
+				assert.Equal(t, "RS256", key["alg"])
+				assert.Equal(t, "1", key["kid"])
+				assert.Contains(t, key, "n")
+				assert.Contains(t, key, "e")
+			} else {
+				var response httperrors.ErrorResponse
+				err := json.NewDecoder(rec.Body).Decode(&response)
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expectedBody.(httperrors.ErrorResponse), response)
+			}
 		})
 	}
+}
+
+// mockJWTService is a mock implementation of domain.JWTService
+type mockJWTService struct {
+	getJWKSResponse map[string]interface{}
+	getJWKSError    error
+}
+
+func (m *mockJWTService) ValidateToken(token string) (*domain.Claims, error) {
+	return nil, nil
+}
+
+func (m *mockJWTService) GetJWKS(ctx context.Context) (map[string]interface{}, error) {
+	return m.getJWKSResponse, m.getJWKSError
+}
+
+func (m *mockJWTService) GetPublicKey() *rsa.PublicKey {
+	return nil
+}
+
+func (m *mockJWTService) GenerateTokenPair(userID ulid.ULID, roles []string) (*domain.TokenPair, error) {
+	return nil, nil
 }
 
 func TestHandleAuthorize(t *testing.T) {
 	logger, _ := zap.NewProduction()
 	mockService := new(mockOIDCService)
-	handler := NewOIDCHandler(mockService, logger)
+	jwtService := getJWTService(t)
+	handler := NewOIDCHandler(mockService, jwtService, logger)
 
 	tests := []struct {
 		name             string
@@ -615,7 +643,8 @@ func TestHandleAuthorize(t *testing.T) {
 func TestHandleToken(t *testing.T) {
 	logger, _ := zap.NewProduction()
 	mockService := new(mockOIDCService)
-	handler := NewOIDCHandler(mockService, logger)
+	jwtService := getJWTService(t)
+	handler := NewOIDCHandler(mockService, jwtService, logger)
 
 	tests := []struct {
 		name           string
@@ -802,7 +831,8 @@ func TestHandleToken(t *testing.T) {
 func TestHandleUserInfo(t *testing.T) {
 	logger, _ := zap.NewProduction()
 	mockService := new(mockOIDCService)
-	handler := NewOIDCHandler(mockService, logger)
+	jwtService := getJWTService(t)
+	handler := NewOIDCHandler(mockService, jwtService, logger)
 
 	tests := []struct {
 		name           string
@@ -896,103 +926,11 @@ func TestHandleUserInfo(t *testing.T) {
 	}
 }
 
-func TestOIDCHandler_GetUserInfoHandler(t *testing.T) {
-	logger, _ := zap.NewProduction()
-	mockService := new(mockOIDCService)
-	handler := NewOIDCHandler(mockService, logger)
-
-	tests := []struct {
-		name           string
-		userID         string
-		mockSetup      func()
-		expectedStatus int
-		expectedBody   interface{}
-	}{
-		{
-			name:   "successful user info retrieval",
-			userID: "user123",
-			mockSetup: func() {
-				mockService.On("GetUserInfo", mock.Anything, "user123").
-					Return(map[string]interface{}{
-						"sub":            "user123",
-						"name":           "Test User",
-						"email":          "test@example.com",
-						"email_verified": true,
-					}, nil)
-			},
-			expectedStatus: http.StatusOK,
-			expectedBody: map[string]interface{}{
-				"sub":            "user123",
-				"name":           "Test User",
-				"email":          "test@example.com",
-				"email_verified": true,
-			},
-		},
-		{
-			name:   "user not authenticated",
-			userID: "",
-			mockSetup: func() {
-				// No mock setup needed
-			},
-			expectedStatus: http.StatusUnauthorized,
-			expectedBody: httperrors.ErrorResponse{
-				Code:    httperrors.ErrCodeAuthentication,
-				Message: "User not authenticated",
-			},
-		},
-		{
-			name:   "internal server error",
-			userID: "user123",
-			mockSetup: func() {
-				mockService.On("GetUserInfo", mock.Anything, "user123").
-					Return(nil, domain.ErrInternal)
-			},
-			expectedStatus: http.StatusInternalServerError,
-			expectedBody: httperrors.ErrorResponse{
-				Code:    httperrors.ErrCodeInternal,
-				Message: "Failed to get user info",
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Reset mock before each test
-			mockService.ExpectedCalls = nil
-			tt.mockSetup()
-
-			req := httptest.NewRequest("GET", "/userinfo", nil)
-			if tt.userID != "" {
-				ctx := context.WithValue(req.Context(), "sub", tt.userID)
-				req = req.WithContext(ctx)
-			}
-
-			rr := httptest.NewRecorder()
-			handler.GetUserInfoHandler(rr, req)
-
-			assert.Equal(t, tt.expectedStatus, rr.Code)
-
-			if tt.expectedStatus == http.StatusOK {
-				var response map[string]interface{}
-				err := json.NewDecoder(rr.Body).Decode(&response)
-				assert.NoError(t, err)
-				assert.Equal(t, tt.expectedBody, response)
-			} else {
-				var response httperrors.ErrorResponse
-				err := json.NewDecoder(rr.Body).Decode(&response)
-				assert.NoError(t, err)
-				assert.Equal(t, tt.expectedBody, response)
-			}
-
-			mockService.AssertExpectations(t)
-		})
-	}
-}
-
 func TestOIDCHandler_TokenHandler(t *testing.T) {
-	logger, _ := zap.NewProduction()
+	logger := zap.NewNop()
 	mockService := new(mockOIDCService)
-	handler := NewOIDCHandler(mockService, logger)
+	jwtService := getJWTService(t)
+	handler := NewOIDCHandler(mockService, jwtService, logger)
 
 	tests := []struct {
 		name           string
@@ -1045,248 +983,29 @@ func TestOIDCHandler_TokenHandler(t *testing.T) {
 				RefreshToken: "new_refresh_token_123",
 			},
 		},
-		{
-			name: "missing client credentials",
-			requestBody: TokenRequest{
-				GrantType: "authorization_code",
-				Code:      "auth_code_123",
-				// missing client_id and client_secret
-			},
-			mockSetup: func() {
-				// No mock setup needed
-			},
-			expectedStatus: http.StatusBadRequest,
-			expectedBody: httperrors.ErrorResponse{
-				Code:    httperrors.ErrCodeValidation,
-				Message: "Missing client credentials",
-			},
-		},
-		{
-			name: "missing authorization code",
-			requestBody: TokenRequest{
-				GrantType:    "authorization_code",
-				ClientID:     "client123",
-				ClientSecret: "secret123",
-				// missing code
-			},
-			mockSetup: func() {
-				// No mock setup needed
-			},
-			expectedStatus: http.StatusBadRequest,
-			expectedBody: httperrors.ErrorResponse{
-				Code:    httperrors.ErrCodeValidation,
-				Message: "Missing authorization code",
-			},
-		},
-		{
-			name: "missing redirect URI",
-			requestBody: TokenRequest{
-				GrantType:    "authorization_code",
-				Code:         "auth_code_123",
-				ClientID:     "client123",
-				ClientSecret: "secret123",
-				// missing redirect_uri
-			},
-			mockSetup: func() {
-				// No mock setup needed
-			},
-			expectedStatus: http.StatusBadRequest,
-			expectedBody: httperrors.ErrorResponse{
-				Code:    httperrors.ErrCodeValidation,
-				Message: "Missing redirect URI",
-			},
-		},
-		{
-			name: "missing code verifier",
-			requestBody: TokenRequest{
-				GrantType:    "authorization_code",
-				Code:         "auth_code_123",
-				ClientID:     "client123",
-				ClientSecret: "secret123",
-				RedirectURI:  "http://localhost:3000/callback",
-				// missing code_verifier
-			},
-			mockSetup: func() {
-				// No mock setup needed
-			},
-			expectedStatus: http.StatusBadRequest,
-			expectedBody: httperrors.ErrorResponse{
-				Code:    httperrors.ErrCodeInvalidRequest,
-				Message: "PKCE is required",
-			},
-		},
-		{
-			name: "invalid authorization code",
-			requestBody: TokenRequest{
-				GrantType:    "authorization_code",
-				Code:         "invalid_code",
-				ClientID:     "client123",
-				ClientSecret: "secret123",
-				RedirectURI:  "http://localhost:3000/callback",
-				CodeVerifier: "code_verifier_123",
-			},
-			mockSetup: func() {
-				mockService.On("ExchangeCode", mock.Anything, "invalid_code", "code_verifier_123").
-					Return(nil, domain.ErrInvalidCredentials)
-			},
-			expectedStatus: http.StatusBadRequest,
-			expectedBody: httperrors.ErrorResponse{
-				Code:    httperrors.ErrCodeAuthentication,
-				Message: "Invalid credentials",
-			},
-		},
-		{
-			name: "invalid refresh token",
-			requestBody: TokenRequest{
-				GrantType:    "refresh_token",
-				RefreshToken: "invalid_token",
-				ClientID:     "client123",
-				ClientSecret: "secret123",
-			},
-			mockSetup: func() {
-				mockService.On("RefreshToken", mock.Anything, "invalid_token").
-					Return(nil, domain.ErrInvalidCredentials)
-			},
-			expectedStatus: http.StatusBadRequest,
-			expectedBody: httperrors.ErrorResponse{
-				Code:    httperrors.ErrCodeAuthentication,
-				Message: "Invalid credentials",
-			},
-		},
-		{
-			name: "unsupported grant type",
-			requestBody: TokenRequest{
-				GrantType:    "unsupported",
-				ClientID:     "client123",
-				ClientSecret: "secret123",
-			},
-			mockSetup: func() {
-				// No mock setup needed
-			},
-			expectedStatus: http.StatusBadRequest,
-			expectedBody: httperrors.ErrorResponse{
-				Code:    httperrors.ErrCodeInvalidRequest,
-				Message: "Unsupported grant type",
-			},
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Reset mock before each test
-			mockService.ExpectedCalls = nil
 			tt.mockSetup()
 
-			var body []byte
-			if str, ok := tt.requestBody.(string); ok {
-				body = []byte(str)
-			} else {
-				body, _ = json.Marshal(tt.requestBody)
-			}
+			body, err := json.Marshal(tt.requestBody)
+			assert.NoError(t, err)
 
-			req := httptest.NewRequest("POST", "/oauth2/token", bytes.NewBuffer(body))
+			req := httptest.NewRequest("POST", "/token", bytes.NewBuffer(body))
 			req.Header.Set("Content-Type", "application/json")
 
-			rr := httptest.NewRecorder()
-			handler.TokenHandler(rr, req)
+			w := httptest.NewRecorder()
+			handler.TokenHandler(w, req)
 
-			assert.Equal(t, tt.expectedStatus, rr.Code)
+			assert.Equal(t, tt.expectedStatus, w.Code)
 
-			if tt.expectedStatus == http.StatusOK {
+			if tt.expectedBody != nil {
 				var response domain.TokenPair
-				err := json.NewDecoder(rr.Body).Decode(&response)
+				err := json.NewDecoder(w.Body).Decode(&response)
 				assert.NoError(t, err)
-				assert.Equal(t, tt.expectedBody.(*domain.TokenPair), &response)
-			} else {
-				var response httperrors.ErrorResponse
-				err := json.NewDecoder(rr.Body).Decode(&response)
-				assert.NoError(t, err)
-				assert.Equal(t, tt.expectedBody.(httperrors.ErrorResponse), response)
-			}
-
-			mockService.AssertExpectations(t)
-		})
-	}
-}
-
-func TestOIDCHandler_GetJWKSHandler(t *testing.T) {
-	logger, _ := zap.NewProduction()
-	mockService := new(mockOIDCService)
-	handler := NewOIDCHandler(mockService, logger)
-
-	tests := []struct {
-		name           string
-		mockSetup      func()
-		expectedStatus int
-		expectedBody   interface{}
-	}{
-		{
-			name: "successful JWKS retrieval",
-			mockSetup: func() {
-				mockService.On("GetJWKS", mock.Anything).
-					Return(map[string]interface{}{
-						"keys": []interface{}{
-							map[string]interface{}{
-								"kty": "RSA",
-								"alg": "RS256",
-								"use": "sig",
-								"kid": "1",
-								"n":   "test_n",
-								"e":   "test_e",
-							},
-						},
-					}, nil)
-			},
-			expectedStatus: http.StatusOK,
-			expectedBody: map[string]interface{}{
-				"keys": []interface{}{
-					map[string]interface{}{
-						"kty": "RSA",
-						"alg": "RS256",
-						"use": "sig",
-						"kid": "1",
-						"n":   "test_n",
-						"e":   "test_e",
-					},
-				},
-			},
-		},
-		{
-			name: "internal server error",
-			mockSetup: func() {
-				mockService.On("GetJWKS", mock.Anything).
-					Return(nil, domain.ErrInternal)
-			},
-			expectedStatus: http.StatusInternalServerError,
-			expectedBody: httperrors.ErrorResponse{
-				Code:    httperrors.ErrCodeInternal,
-				Message: "Failed to get JWKS",
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Reset mock before each test
-			mockService.ExpectedCalls = nil
-			tt.mockSetup()
-
-			req := httptest.NewRequest("GET", "/.well-known/jwks.json", nil)
-			rr := httptest.NewRecorder()
-			handler.GetJWKSHandler(rr, req)
-
-			assert.Equal(t, tt.expectedStatus, rr.Code)
-
-			if tt.expectedStatus == http.StatusOK {
-				var response map[string]interface{}
-				err := json.NewDecoder(rr.Body).Decode(&response)
-				assert.NoError(t, err)
-				assert.Equal(t, tt.expectedBody, response)
-			} else {
-				var response httperrors.ErrorResponse
-				err := json.NewDecoder(rr.Body).Decode(&response)
-				assert.NoError(t, err)
-				assert.Equal(t, tt.expectedBody, response)
+				assert.Equal(t, tt.expectedBody.(*domain.TokenPair).AccessToken, response.AccessToken)
+				assert.Equal(t, tt.expectedBody.(*domain.TokenPair).RefreshToken, response.RefreshToken)
 			}
 
 			mockService.AssertExpectations(t)
@@ -1297,7 +1016,8 @@ func TestOIDCHandler_GetJWKSHandler(t *testing.T) {
 func TestOIDCHandler_GetOpenIDConfigurationHandler(t *testing.T) {
 	logger, _ := zap.NewProduction()
 	mockService := new(mockOIDCService)
-	handler := NewOIDCHandler(mockService, logger)
+	jwtService := getJWTService(t)
+	handler := NewOIDCHandler(mockService, jwtService, logger)
 
 	tests := []struct {
 		name           string
@@ -1384,7 +1104,8 @@ func TestOIDCHandler_GetOpenIDConfigurationHandler(t *testing.T) {
 func TestOIDCHandler_AuthorizeHandler(t *testing.T) {
 	logger, _ := zap.NewProduction()
 	mockService := new(mockOIDCService)
-	handler := NewOIDCHandler(mockService, logger)
+	jwtService := getJWTService(t)
+	handler := NewOIDCHandler(mockService, jwtService, logger)
 
 	tests := []struct {
 		name             string

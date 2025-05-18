@@ -14,9 +14,6 @@ type OIDCService interface {
 	// GetUserInfo retrieves user information for the given user ID
 	GetUserInfo(ctx context.Context, userID string) (map[string]interface{}, error)
 
-	// GetJWKS retrieves the JSON Web Key Set
-	GetJWKS(ctx context.Context) (map[string]interface{}, error)
-
 	// GetOpenIDConfiguration retrieves the OpenID Connect configuration
 	GetOpenIDConfiguration(ctx context.Context) (map[string]interface{}, error)
 

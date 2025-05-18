@@ -7,6 +7,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/ipede/user-manager-service/internal/application"
+	"github.com/ipede/user-manager-service/internal/infrastructure/config"
 	"github.com/ipede/user-manager-service/internal/infrastructure/database"
 	"github.com/ipede/user-manager-service/internal/infrastructure/jwt"
 	"github.com/ipede/user-manager-service/internal/infrastructure/repository"
@@ -22,20 +23,22 @@ type Router struct {
 
 func NewRouter(
 	db *database.Postgres,
-	jwt *jwt.JWT,
+	cfg *config.Config,
 	logger *zap.Logger,
 ) *Router {
-	authMiddleware := auth.NewAuthMiddleware(jwt, logger)
+
+	jwtService := jwt.NewJWTService(cfg, logger)
+	authMiddleware := auth.NewAuthMiddleware(jwtService, logger)
 	userRepo := repository.NewUserRepository(db)
 	oauthRepo := repository.NewOAuth2Repository(db, logger)
 	userService := application.NewUserService(userRepo, logger)
-	authService := application.NewAuthService(userRepo, jwt, logger)
-	oidcService := application.NewOIDCService(authService, jwt, userRepo, oauthRepo, logger)
+	authService := application.NewAuthService(userRepo, jwtService, logger)
+	oidcService := application.NewOIDCService(authService, jwtService, userRepo, oauthRepo, logger)
 
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(authService, logger)
 	userHandler := handlers.NewUserHandler(userService, logger)
-	oidcHandler := handlers.NewOIDCHandler(oidcService, logger)
+	oidcHandler := handlers.NewOIDCHandler(oidcService, jwtService, logger)
 
 	// Swagger documentation
 	router := createRouter()

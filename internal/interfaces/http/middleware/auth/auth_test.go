@@ -5,8 +5,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"crypto/rsa"
+
+	"github.com/ipede/user-manager-service/internal/domain"
+	"github.com/ipede/user-manager-service/internal/infrastructure/config"
 	"github.com/ipede/user-manager-service/internal/infrastructure/jwt"
+	"github.com/oklog/ulid/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"
@@ -16,25 +22,29 @@ type MockJWT struct {
 	mock.Mock
 }
 
-func (m *MockJWT) GenerateTokenPair(userID string, roles []string) (*jwt.TokenPair, error) {
+func (m *MockJWT) GenerateTokenPair(userID ulid.ULID, roles []string) (*domain.TokenPair, error) {
 	args := m.Called(userID, roles)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*jwt.TokenPair), args.Error(1)
+	return args.Get(0).(*domain.TokenPair), args.Error(1)
 }
 
-func (m *MockJWT) ValidateToken(token string) (*jwt.Claims, error) {
+func (m *MockJWT) ValidateToken(token string) (*domain.Claims, error) {
 	args := m.Called(token)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*jwt.Claims), args.Error(1)
+	return args.Get(0).(*domain.Claims), args.Error(1)
 }
 
-func (m *MockJWT) GetJWKS() ([]interface{}, error) {
-	args := m.Called()
-	return args.Get(0).([]interface{}), args.Error(1)
+func (m *MockJWT) GetJWKS(ctx context.Context) (map[string]interface{}, error) {
+	args := m.Called(ctx)
+	return args.Get(0).(map[string]interface{}), args.Error(1)
+}
+
+func (m *MockJWT) GetPublicKey() *rsa.PublicKey {
+	return nil
 }
 
 func TestAuthMiddleware_Authenticator(t *testing.T) {
@@ -67,7 +77,7 @@ func TestAuthMiddleware_Authenticator(t *testing.T) {
 			name:  "valid token",
 			token: "valid-token",
 			mockSetup: func(m *MockJWT) {
-				m.On("ValidateToken", "valid-token").Return(&jwt.Claims{
+				m.On("ValidateToken", "valid-token").Return(&domain.Claims{
 					Roles: []string{"admin"},
 				}, nil)
 			},
@@ -104,6 +114,7 @@ func TestAuthMiddleware_Authenticator(t *testing.T) {
 }
 
 func TestAuthMiddleware_RequireRole(t *testing.T) {
+	logger := zap.NewNop()
 	tests := []struct {
 		name           string
 		requiredRole   string
@@ -137,10 +148,12 @@ func TestAuthMiddleware_RequireRole(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create a real JWT instance for the middleware
-			realJWT, err := jwt.New(15*60, 24*60*60)
-			if err != nil {
-				t.Fatalf("Failed to create JWT service: %v", err)
+			cfg := &config.Config{
+				JWTAccessDuration:  15 * time.Minute,
+				JWTRefreshDuration: 24 * time.Hour,
+				JWTSecret:          "test_secret",
 			}
+			realJWT := jwt.NewJWTService(cfg, logger)
 
 			middleware := NewAuthMiddleware(realJWT, zap.NewNop())
 
@@ -165,6 +178,7 @@ func TestAuthMiddleware_RequireRole(t *testing.T) {
 }
 
 func TestAuthMiddleware_ExtractToken(t *testing.T) {
+	logger := zap.NewNop()
 	tests := []struct {
 		name          string
 		authHeader    string
@@ -188,12 +202,14 @@ func TestAuthMiddleware_ExtractToken(t *testing.T) {
 	}
 
 	// Create a real JWT instance for the middleware
-	realJWT, err := jwt.New(15*60, 24*60*60)
-	if err != nil {
-		t.Fatalf("Failed to create JWT service: %v", err)
+	cfg := &config.Config{
+		JWTAccessDuration:  15 * time.Minute,
+		JWTRefreshDuration: 24 * time.Hour,
+		JWTSecret:          "test_secret",
 	}
+	realJWT := jwt.NewJWTService(cfg, logger)
 
-	middleware := NewAuthMiddleware(realJWT, zap.NewNop())
+	middleware := NewAuthMiddleware(realJWT, logger)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
