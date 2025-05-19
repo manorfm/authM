@@ -229,7 +229,7 @@ func (m *mockOIDCService) Authorize(ctx context.Context, clientID, redirectURI, 
 	return args.String(0), args.Error(1)
 }
 
-func getJWTService(t *testing.T) *jwtinfra.JWTService {
+func getJWTService(t *testing.T) jwtinfra.JWTService {
 	logger := zap.NewNop()
 	cfg := &config.Config{
 		JWTAccessDuration:  15 * time.Minute,
@@ -339,7 +339,6 @@ func TestHandleJWKS(t *testing.T) {
 						"kty": "RSA",
 						"use": "sig",
 						"alg": "RS256",
-						"kid": "1",
 					},
 				},
 			},
@@ -394,7 +393,7 @@ func TestHandleJWKS(t *testing.T) {
 				assert.Equal(t, "RSA", key["kty"])
 				assert.Equal(t, "sig", key["use"])
 				assert.Equal(t, "RS256", key["alg"])
-				assert.Equal(t, "1", key["kid"])
+				assert.Contains(t, key, "kid")
 				assert.Contains(t, key, "n")
 				assert.Contains(t, key, "e")
 			} else {

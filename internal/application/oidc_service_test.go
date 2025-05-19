@@ -10,8 +10,6 @@ import (
 
 	jwtv5 "github.com/golang-jwt/jwt/v5"
 	"github.com/ipede/user-manager-service/internal/domain"
-	"github.com/ipede/user-manager-service/internal/infrastructure/config"
-	jwtinfra "github.com/ipede/user-manager-service/internal/infrastructure/jwt"
 	"github.com/oklog/ulid/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -413,11 +411,7 @@ func TestOIDCService_ExchangeCode(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mockOAuth2Repo := new(mockOAuth2Repository)
 			mockUserRepo := new(mockUserRepository)
-			cfg := &config.Config{
-				JWTAccessDuration:  time.Hour,
-				JWTRefreshDuration: time.Hour,
-			}
-			jwtService := jwtinfra.NewJWTService(cfg, logger)
+			mockJWT := &mockJWTRefresh{} // Use mock JWT service instead of real one
 
 			tt.mockSetup(mockOAuth2Repo)
 			if tt.name == "successful code exchange" {
@@ -429,7 +423,7 @@ func TestOIDCService_ExchangeCode(t *testing.T) {
 				}, nil)
 			}
 
-			service := NewOIDCService(nil, jwtService, mockUserRepo, mockOAuth2Repo, logger)
+			service := NewOIDCService(nil, mockJWT, mockUserRepo, mockOAuth2Repo, logger)
 
 			token, err := service.ExchangeCode(context.Background(), tt.code, tt.codeVerifier)
 
@@ -440,6 +434,7 @@ func TestOIDCService_ExchangeCode(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 				assert.NotNil(t, token)
+				assert.Equal(t, tt.expectedToken, token)
 			}
 
 			mockOAuth2Repo.AssertExpectations(t)
