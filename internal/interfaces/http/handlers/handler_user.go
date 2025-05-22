@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/ipede/user-manager-service/internal/application"
 	"github.com/ipede/user-manager-service/internal/interfaces/http/dto"
 	"github.com/ipede/user-manager-service/internal/interfaces/http/errors"
@@ -24,7 +25,7 @@ func NewUserHandler(userService *application.UserService, logger *zap.Logger) *H
 }
 
 func (h *HandlerUser) GetUserHandler(w http.ResponseWriter, r *http.Request) {
-	userID := r.URL.Query().Get("id")
+	userID := chi.URLParam(r, "id")
 	if userID == "" {
 		errors.RespondWithError(w, errors.ErrCodeValidation, "user ID is required", nil, http.StatusBadRequest)
 		return
@@ -77,7 +78,7 @@ func (h *HandlerUser) ListUsersHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *HandlerUser) UpdateUserHandler(w http.ResponseWriter, r *http.Request) {
-	userID := r.URL.Query().Get("id")
+	userID := chi.URLParam(r, "id")
 	if userID == "" {
 		errors.RespondWithError(w, errors.ErrCodeValidation, "user ID is required", nil, http.StatusBadRequest)
 		return

@@ -26,14 +26,16 @@ type JWTService interface {
 	RotateKeys() error
 	BlacklistToken(tokenID string, expiresAt time.Time) error
 	IsTokenBlacklisted(tokenID string) bool
+	TryVault() error
 }
 
 type jwtService struct {
-	jwt         *domain.JWT
+	strategy    domain.JWTStrategy
 	logger      *zap.Logger
 	mu          sync.RWMutex
 	cache       *jwksCache
 	rateLimiter *rate.Limiter
+	blacklist   map[string]time.Time // tokenID -> expiration
 }
 
 type jwksCache struct {
@@ -61,19 +63,52 @@ func NewJWTService(cfg *config.Config, logger *zap.Logger) JWTService {
 		logger.Fatal("Invalid JWT configuration", zap.Error(err))
 	}
 
-	jwt, err := domain.NewJWT(jwtConfig)
-	if err != nil {
-		logger.Fatal("Failed to initialize JWT service", zap.Error(err))
+	// Create Vault strategy
+	vaultConfig := &domain.VaultConfig{
+		Address:         cfg.VaultAddress,
+		Token:           cfg.VaultToken,
+		MountPath:       cfg.VaultMountPath,
+		KeyName:         cfg.VaultKeyName,
+		RoleName:        cfg.VaultRoleName,
+		AuthMethod:      cfg.VaultAuthMethod,
+		RetryCount:      cfg.VaultRetryCount,
+		RetryDelay:      cfg.VaultRetryDelay,
+		Timeout:         cfg.VaultTimeout,
+		AccessDuration:  cfg.JWTAccessDuration,
+		RefreshDuration: cfg.JWTRefreshDuration,
 	}
+
+	vaultStrategy, err := NewVaultStrategy(vaultConfig, logger)
+	if err != nil {
+		logger.Warn("Failed to create Vault strategy, falling back to local strategy",
+			zap.Error(err))
+	}
+
+	// Create local strategy
+	localConfig := &domain.LocalConfig{
+		KeyPath:         cfg.JWTKeyPath,
+		KeyPassword:     cfg.JWTKeyPassword,
+		AccessDuration:  cfg.JWTAccessDuration,
+		RefreshDuration: cfg.JWTRefreshDuration,
+	}
+
+	localStrategy, err := NewLocalStrategy(localConfig, logger)
+	if err != nil {
+		logger.Fatal("Failed to create local strategy", zap.Error(err))
+	}
+
+	// Create composite strategy
+	strategy := NewCompositeStrategy(vaultStrategy, localStrategy, logger)
 
 	// Create rate limiter: 100 requests per second with burst of 200
 	limiter := rate.NewLimiter(rate.Limit(100), 200)
 
 	return &jwtService{
-		jwt:         jwt,
+		strategy:    strategy,
 		logger:      logger,
 		cache:       newJWKSCache(),
 		rateLimiter: limiter,
+		blacklist:   make(map[string]time.Time),
 	}
 }
 
@@ -95,7 +130,7 @@ func (j *jwtService) ValidateToken(tokenString string) (*domain.Claims, error) {
 		}
 
 		// Get public key
-		publicKey := j.jwt.GetPublicKey()
+		publicKey := j.strategy.GetPublicKey()
 		if publicKey == nil {
 			return nil, domain.ErrInvalidToken
 		}
@@ -118,7 +153,7 @@ func (j *jwtService) ValidateToken(tokenString string) (*domain.Claims, error) {
 			j.logger.Error("Failed to parse token (generic)",
 				zap.Error(err),
 				zap.String("error_type", fmt.Sprintf("%T", err)))
-			return nil, fmt.Errorf("invalid token: %w", err)
+			return nil, domain.ErrInvalidToken
 		}
 	}
 
@@ -127,11 +162,6 @@ func (j *jwtService) ValidateToken(tokenString string) (*domain.Claims, error) {
 		j.logger.Error("Invalid token (not valid)",
 			zap.String("token_id", claims.ID))
 		return nil, domain.ErrInvalidToken
-	}
-
-	// Check if token is blacklisted (by ID) ANTES da validação de claims/expiração
-	if j.jwt.IsTokenBlacklisted(claims.ID) {
-		return nil, domain.ErrTokenBlacklisted
 	}
 
 	// Validate claims
@@ -146,7 +176,7 @@ func (j *jwtService) ValidateToken(tokenString string) (*domain.Claims, error) {
 				zap.String("token_id", claims.ID))
 			return nil, domain.ErrTokenExpired
 		}
-		return nil, fmt.Errorf("%w: %s", domain.ErrInvalidClaims, err)
+		return nil, domain.ErrInvalidClaims
 	}
 
 	// Additional validation
@@ -156,6 +186,11 @@ func (j *jwtService) ValidateToken(tokenString string) (*domain.Claims, error) {
 		return nil, domain.ErrInvalidClaims
 	}
 
+	// Check blacklist
+	if j.IsTokenBlacklisted(claims.ID) {
+		j.logger.Warn("Token is blacklisted", zap.String("token_id", claims.ID))
+		return nil, domain.ErrTokenBlacklisted
+	}
 	return claims, nil
 }
 
@@ -178,17 +213,17 @@ func (j *jwtService) GetJWKS(ctx context.Context) (map[string]interface{}, error
 	j.cache.mu.RUnlock()
 
 	// Cache miss or expired, generate new JWKS
-	publicKey := j.jwt.GetPublicKey()
+	publicKey := j.strategy.GetPublicKey()
 	if publicKey == nil {
 		j.logger.Error("Failed to get public key")
-		return nil, fmt.Errorf("failed to get public key: %w", domain.ErrInvalidClient)
+		return nil, domain.ErrInvalidClient
 	}
 
-	jwk, err := convertToJWK(publicKey, j.jwt.GetKeyID())
+	jwk, err := convertToJWK(publicKey, j.strategy.GetKeyID())
 	if err != nil {
 		j.logger.Error("Failed to convert public key to JWK",
 			zap.Error(err))
-		return nil, fmt.Errorf("failed to convert public key to JWK: %w", err)
+		return nil, domain.ErrInvalidKeyConfig
 	}
 
 	keys := map[string]interface{}{
@@ -220,21 +255,19 @@ func (j *jwtService) GenerateTokenPair(userID ulid.ULID, roles []string) (*domai
 		Roles: roles,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   userID.String(),
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(j.jwt.GetAccessDuration())),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(j.strategy.GetAccessDuration())),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 			ID:        accessTokenID,
 		},
 	}
 
-	accessToken := jwt.NewWithClaims(jwt.SigningMethodRS256, accessClaims)
-	accessToken.Header["kid"] = j.jwt.GetKeyID()
-	accessTokenString, err := accessToken.SignedString(j.jwt.GetPrivateKey())
+	accessToken, err := j.strategy.Sign(&accessClaims)
 	if err != nil {
 		j.logger.Error("Failed to sign access token",
 			zap.Error(err),
 			zap.String("token_id", accessTokenID),
 			zap.String("user_id", userID.String()))
-		return nil, fmt.Errorf("failed to sign access token: %w", err)
+		return nil, domain.ErrTokenGeneration
 	}
 
 	// Generate refresh token
@@ -243,39 +276,37 @@ func (j *jwtService) GenerateTokenPair(userID ulid.ULID, roles []string) (*domai
 		Roles: roles,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   userID.String(),
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(j.jwt.GetRefreshDuration())),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(j.strategy.GetRefreshDuration())),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 			ID:        refreshTokenID,
 		},
 	}
 
-	refreshToken := jwt.NewWithClaims(jwt.SigningMethodRS256, refreshClaims)
-	refreshToken.Header["kid"] = j.jwt.GetKeyID()
-	refreshTokenString, err := refreshToken.SignedString(j.jwt.GetPrivateKey())
+	refreshToken, err := j.strategy.Sign(&refreshClaims)
 	if err != nil {
 		j.logger.Error("Failed to sign refresh token",
 			zap.Error(err),
 			zap.String("token_id", refreshTokenID),
 			zap.String("user_id", userID.String()))
-		return nil, fmt.Errorf("failed to sign refresh token: %w", err)
+		return nil, domain.ErrTokenGeneration
 	}
 
 	j.logger.Debug("Generated token pair",
 		zap.String("access_token_id", accessTokenID),
 		zap.String("refresh_token_id", refreshTokenID),
 		zap.String("user_id", userID.String()),
-		zap.String("key_id", j.jwt.GetKeyID()))
+		zap.String("key_id", j.strategy.GetKeyID()))
 
 	return &domain.TokenPair{
-		AccessToken:  accessTokenString,
-		RefreshToken: refreshTokenString,
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
 	}, nil
 }
 
 func (j *jwtService) GetPublicKey() *rsa.PublicKey {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
-	return j.jwt.GetPublicKey()
+	return j.strategy.GetPublicKey()
 }
 
 // RotateKeys rotates the JWT keys
@@ -288,9 +319,9 @@ func (j *jwtService) RotateKeys() error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 
-	if err := j.jwt.RotateKey(); err != nil {
+	if err := j.strategy.RotateKey(); err != nil {
 		j.logger.Error("Failed to rotate keys", zap.Error(err))
-		return fmt.Errorf("failed to rotate keys: %w", err)
+		return domain.ErrInvalidKeyConfig
 	}
 
 	// Clear JWKS cache
@@ -300,8 +331,8 @@ func (j *jwtService) RotateKeys() error {
 	j.cache.mu.Unlock()
 
 	j.logger.Info("JWT keys rotated successfully",
-		zap.String("key_id", j.jwt.GetKeyID()),
-		zap.Time("rotation_time", j.jwt.GetLastRotation()))
+		zap.String("key_id", j.strategy.GetKeyID()),
+		zap.Time("rotation_time", j.strategy.GetLastRotation()))
 
 	return nil
 }
@@ -310,8 +341,7 @@ func (j *jwtService) RotateKeys() error {
 func (j *jwtService) BlacklistToken(tokenID string, expiresAt time.Time) error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
-
-	j.jwt.BlacklistToken(tokenID, expiresAt)
+	j.blacklist[tokenID] = expiresAt
 	return nil
 }
 
@@ -319,13 +349,32 @@ func (j *jwtService) BlacklistToken(tokenID string, expiresAt time.Time) error {
 func (j *jwtService) IsTokenBlacklisted(tokenID string) bool {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
-	return j.jwt.IsTokenBlacklisted(tokenID)
+	exp, ok := j.blacklist[tokenID]
+	if !ok {
+		return false
+	}
+	if time.Now().After(exp) {
+		delete(j.blacklist, tokenID)
+		return false
+	}
+	return true
+}
+
+// TryVault attempts to switch back to the Vault strategy
+func (j *jwtService) TryVault() error {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+
+	if composite, ok := j.strategy.(*compositeStrategy); ok {
+		return composite.TryVault()
+	}
+	return domain.ErrInvalidClient
 }
 
 // convertToJWK converts an RSA public key to JWK format
 func convertToJWK(publicKey *rsa.PublicKey, kid string) (map[string]interface{}, error) {
 	if publicKey == nil {
-		return nil, fmt.Errorf("public key is nil")
+		return nil, domain.ErrInvalidKeyConfig
 	}
 
 	// Convert modulus and exponent to Base64URL without padding

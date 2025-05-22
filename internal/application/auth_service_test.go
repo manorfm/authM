@@ -80,9 +80,26 @@ func TestAuthService_Register(t *testing.T) {
 	t.Run("successful registration", func(t *testing.T) {
 		repo := new(MockUserRepository)
 		cfg := &config.Config{
-			JWTAccessDuration:  time.Hour,
-			JWTRefreshDuration: time.Hour * 24,
-			JWTSecret:          "test_secret",
+			DBHost:             "localhost",
+			DBPort:             5432,
+			DBUser:             "postgres",
+			DBPassword:         "postgres",
+			DBName:             "user_manager_test",
+			JWTAccessDuration:  15 * time.Minute,
+			JWTRefreshDuration: 24 * time.Hour,
+			JWTKeyPath:         "test-key",
+			JWTKeyPassword:     "",
+			VaultAddress:       "http://localhost:8200",
+			VaultToken:         "test-token",
+			VaultMountPath:     "transit",
+			VaultKeyName:       "test-key",
+			VaultRoleName:      "test-role",
+			VaultAuthMethod:    "token",
+			VaultRetryCount:    3,
+			VaultRetryDelay:    time.Second,
+			VaultTimeout:       time.Second * 5,
+			ServerPort:         8080,
+			ServerHost:         "localhost",
 		}
 		jwtService := jwt.NewJWTService(cfg, logger)
 		service := NewAuthService(repo, jwtService, logger)
@@ -105,9 +122,26 @@ func TestAuthService_Register(t *testing.T) {
 	t.Run("user already exists", func(t *testing.T) {
 		repo := new(MockUserRepository)
 		cfg := &config.Config{
-			JWTAccessDuration:  time.Hour,
-			JWTRefreshDuration: time.Hour * 24,
-			JWTSecret:          "test_secret",
+			DBHost:             "localhost",
+			DBPort:             5432,
+			DBUser:             "postgres",
+			DBPassword:         "postgres",
+			DBName:             "user_manager_test",
+			JWTAccessDuration:  15 * time.Minute,
+			JWTRefreshDuration: 24 * time.Hour,
+			JWTKeyPath:         "test-key",
+			JWTKeyPassword:     "",
+			VaultAddress:       "http://localhost:8200",
+			VaultToken:         "test-token",
+			VaultMountPath:     "transit",
+			VaultKeyName:       "test-key",
+			VaultRoleName:      "test-role",
+			VaultAuthMethod:    "token",
+			VaultRetryCount:    3,
+			VaultRetryDelay:    time.Second,
+			VaultTimeout:       time.Second * 5,
+			ServerPort:         8080,
+			ServerHost:         "localhost",
 		}
 		jwtService := jwt.NewJWTService(cfg, logger)
 		service := NewAuthService(repo, jwtService, logger)
@@ -123,9 +157,26 @@ func TestAuthService_Register(t *testing.T) {
 	t.Run("repository error on exists check", func(t *testing.T) {
 		repo := new(MockUserRepository)
 		cfg := &config.Config{
-			JWTAccessDuration:  time.Hour,
-			JWTRefreshDuration: time.Hour * 24,
-			JWTSecret:          "test_secret",
+			DBHost:             "localhost",
+			DBPort:             5432,
+			DBUser:             "postgres",
+			DBPassword:         "postgres",
+			DBName:             "user_manager_test",
+			JWTAccessDuration:  15 * time.Minute,
+			JWTRefreshDuration: 24 * time.Hour,
+			JWTKeyPath:         "test-key",
+			JWTKeyPassword:     "",
+			VaultAddress:       "http://localhost:8200",
+			VaultToken:         "test-token",
+			VaultMountPath:     "transit",
+			VaultKeyName:       "test-key",
+			VaultRoleName:      "test-role",
+			VaultAuthMethod:    "token",
+			VaultRetryCount:    3,
+			VaultRetryDelay:    time.Second,
+			VaultTimeout:       time.Second * 5,
+			ServerPort:         8080,
+			ServerHost:         "localhost",
 		}
 		jwtService := jwt.NewJWTService(cfg, logger)
 		service := NewAuthService(repo, jwtService, logger)
@@ -141,9 +192,26 @@ func TestAuthService_Register(t *testing.T) {
 	t.Run("repository error on create", func(t *testing.T) {
 		repo := new(MockUserRepository)
 		cfg := &config.Config{
-			JWTAccessDuration:  time.Hour,
-			JWTRefreshDuration: time.Hour * 24,
-			JWTSecret:          "test_secret",
+			DBHost:             "localhost",
+			DBPort:             5432,
+			DBUser:             "postgres",
+			DBPassword:         "postgres",
+			DBName:             "user_manager_test",
+			JWTAccessDuration:  15 * time.Minute,
+			JWTRefreshDuration: 24 * time.Hour,
+			JWTKeyPath:         "test-key",
+			JWTKeyPassword:     "",
+			VaultAddress:       "http://localhost:8200",
+			VaultToken:         "test-token",
+			VaultMountPath:     "transit",
+			VaultKeyName:       "test-key",
+			VaultRoleName:      "test-role",
+			VaultAuthMethod:    "token",
+			VaultRetryCount:    3,
+			VaultRetryDelay:    time.Second,
+			VaultTimeout:       time.Second * 5,
+			ServerPort:         8080,
+			ServerHost:         "localhost",
 		}
 		jwtService := jwt.NewJWTService(cfg, logger)
 		service := NewAuthService(repo, jwtService, logger)
@@ -215,9 +283,26 @@ func TestAuthService_Login(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := new(MockUserRepository)
 			cfg := &config.Config{
-				JWTAccessDuration:  time.Hour,
-				JWTRefreshDuration: time.Hour * 24,
-				JWTSecret:          "test_secret",
+				DBHost:             "localhost",
+				DBPort:             5432,
+				DBUser:             "postgres",
+				DBPassword:         "postgres",
+				DBName:             "user_manager_test",
+				JWTAccessDuration:  15 * time.Minute,
+				JWTRefreshDuration: 24 * time.Hour,
+				JWTKeyPath:         "test-key",
+				JWTKeyPassword:     "",
+				VaultAddress:       "http://localhost:8200",
+				VaultToken:         "test-token",
+				VaultMountPath:     "transit",
+				VaultKeyName:       "test-key",
+				VaultRoleName:      "test-role",
+				VaultAuthMethod:    "token",
+				VaultRetryCount:    3,
+				VaultRetryDelay:    time.Second,
+				VaultTimeout:       time.Second * 5,
+				ServerPort:         8080,
+				ServerHost:         "localhost",
 			}
 			jwtService := jwt.NewJWTService(cfg, zap.NewNop())
 			service := NewAuthService(repo, jwtService, zap.NewNop())

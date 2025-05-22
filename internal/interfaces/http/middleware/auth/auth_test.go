@@ -149,9 +149,26 @@ func TestAuthMiddleware_RequireRole(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create a real JWT instance for the middleware
 			cfg := &config.Config{
+				DBHost:             "localhost",
+				DBPort:             5432,
+				DBUser:             "postgres",
+				DBPassword:         "postgres",
+				DBName:             "user_manager_test",
 				JWTAccessDuration:  15 * time.Minute,
 				JWTRefreshDuration: 24 * time.Hour,
-				JWTSecret:          "test_secret",
+				JWTKeyPath:         "test-key",
+				JWTKeyPassword:     "",
+				VaultAddress:       "http://localhost:8200",
+				VaultToken:         "test-token",
+				VaultMountPath:     "transit",
+				VaultKeyName:       "test-key",
+				VaultRoleName:      "test-role",
+				VaultAuthMethod:    "token",
+				VaultRetryCount:    3,
+				VaultRetryDelay:    time.Second,
+				VaultTimeout:       time.Second * 5,
+				ServerPort:         8080,
+				ServerHost:         "localhost",
 			}
 			realJWT := jwt.NewJWTService(cfg, logger)
 
@@ -203,9 +220,26 @@ func TestAuthMiddleware_ExtractToken(t *testing.T) {
 
 	// Create a real JWT instance for the middleware
 	cfg := &config.Config{
+		DBHost:             "localhost",
+		DBPort:             5432,
+		DBUser:             "postgres",
+		DBPassword:         "postgres",
+		DBName:             "user_manager_test",
 		JWTAccessDuration:  15 * time.Minute,
 		JWTRefreshDuration: 24 * time.Hour,
-		JWTSecret:          "test_secret",
+		JWTKeyPath:         "test-key",
+		JWTKeyPassword:     "",
+		VaultAddress:       "http://localhost:8200",
+		VaultToken:         "test-token",
+		VaultMountPath:     "transit",
+		VaultKeyName:       "test-key",
+		VaultRoleName:      "test-role",
+		VaultAuthMethod:    "token",
+		VaultRetryCount:    3,
+		VaultRetryDelay:    time.Second,
+		VaultTimeout:       time.Second * 5,
+		ServerPort:         8080,
+		ServerHost:         "localhost",
 	}
 	realJWT := jwt.NewJWTService(cfg, logger)
 

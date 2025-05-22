@@ -81,20 +81,14 @@ func TestLoadConfig(t *testing.T) {
 				if cfg.DBName != "user_manager_test" {
 					t.Errorf("LoadConfig() DBName = %v, want %v", cfg.DBName, "user_manager_test")
 				}
-				if cfg.JWTSecret != "test_secret" {
-					t.Errorf("LoadConfig() JWTSecret = %v, want %v", cfg.JWTSecret, "test_secret")
-				}
 				if cfg.JWTAccessDuration != 15*time.Minute {
 					t.Errorf("LoadConfig() JWTAccessDuration = %v, want %v", cfg.JWTAccessDuration, 15*time.Minute)
 				}
 				if cfg.JWTRefreshDuration != 24*time.Hour {
 					t.Errorf("LoadConfig() JWTRefreshDuration = %v, want %v", cfg.JWTRefreshDuration, 24*time.Hour)
 				}
-				if cfg.ServerPort != "8080" {
-					t.Errorf("LoadConfig() ServerPort = %v, want %v", cfg.ServerPort, "8080")
-				}
-				if cfg.Environment != "test" {
-					t.Errorf("LoadConfig() Environment = %v, want %v", cfg.Environment, "test")
+				if cfg.ServerPort != 8080 {
+					t.Errorf("LoadConfig() ServerPort = %v, want %v", cfg.ServerPort, 8080)
 				}
 			}
 		})

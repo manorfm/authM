@@ -232,9 +232,26 @@ func (m *mockOIDCService) Authorize(ctx context.Context, clientID, redirectURI, 
 func getJWTService(t *testing.T) jwtinfra.JWTService {
 	logger := zap.NewNop()
 	cfg := &config.Config{
+		DBHost:             "localhost",
+		DBPort:             5432,
+		DBUser:             "postgres",
+		DBPassword:         "postgres",
+		DBName:             "user_manager_test",
 		JWTAccessDuration:  15 * time.Minute,
 		JWTRefreshDuration: 24 * time.Hour,
-		JWTSecret:          "test_secret",
+		JWTKeyPath:         "test-key",
+		JWTKeyPassword:     "",
+		VaultAddress:       "http://localhost:8200",
+		VaultToken:         "test-token",
+		VaultMountPath:     "transit",
+		VaultKeyName:       "test-key",
+		VaultRoleName:      "test-role",
+		VaultAuthMethod:    "token",
+		VaultRetryCount:    3,
+		VaultRetryDelay:    time.Second,
+		VaultTimeout:       time.Second * 5,
+		ServerPort:         8080,
+		ServerHost:         "localhost",
 	}
 	return jwtinfra.NewJWTService(cfg, logger)
 }
