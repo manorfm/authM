@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/ipede/user-manager-service/internal/application"
@@ -55,7 +56,27 @@ func (h *HandlerUser) GetUserHandler(w http.ResponseWriter, r *http.Request) {
 
 func (h *HandlerUser) ListUsersHandler(w http.ResponseWriter, r *http.Request) {
 	limit := 10
+	limitStr := r.URL.Query().Get("limit")
+
+	if limitStr != "" {
+		var err error
+		limit, err = strconv.Atoi(limitStr)
+		if err != nil {
+			errors.RespondWithError(w, errors.ErrCodeValidation, "invalid limit", nil, http.StatusBadRequest)
+			return
+		}
+	}
+
 	offset := 0
+	offsetStr := r.URL.Query().Get("offset")
+	if offsetStr != "" {
+		var err error
+		offset, err = strconv.Atoi(offsetStr)
+		if err != nil {
+			errors.RespondWithError(w, errors.ErrCodeValidation, "invalid offset", nil, http.StatusBadRequest)
+			return
+		}
+	}
 
 	users, err := h.userService.ListUsers(r.Context(), limit, offset)
 	if err != nil {

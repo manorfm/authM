@@ -47,7 +47,34 @@ var (
 	ErrInvalidDuration      = errors.New("invalid token duration")
 	ErrTokenBlacklisted     = errors.New("token is blacklisted")
 	ErrRateLimitExceeded    = errors.New("rate limit exceeded")
+	ErrMalformedToken       = errors.New("malformed token")
+	ErrInvalidSignature     = errors.New("invalid signature")
 )
+
+// JWTError represents a JWT-specific error
+type JWTError struct {
+	Op  string // Operation that failed
+	Err error  // The underlying error
+}
+
+func (e *JWTError) Error() string {
+	if e.Err == nil {
+		return e.Op
+	}
+	return fmt.Sprintf("%s: %v", e.Op, e.Err)
+}
+
+func (e *JWTError) Unwrap() error {
+	return e.Err
+}
+
+// NewJWTError creates a new JWT error
+func NewJWTError(op string, err error) error {
+	return &JWTError{
+		Op:  op,
+		Err: err,
+	}
+}
 
 // JWTConfig holds the configuration for JWT service
 type JWTConfig struct {
@@ -111,23 +138,23 @@ type Claims struct {
 func (c *Claims) Valid() error {
 	// Validate standard claims
 	if c.ExpiresAt != nil && c.ExpiresAt.Before(time.Now()) {
-		return ErrTokenExpired
+		return NewJWTError("validate claims", ErrTokenExpired)
 	}
 
 	if c.IssuedAt != nil && c.IssuedAt.After(time.Now()) {
-		return errors.New("token issued in the future")
+		return NewJWTError("validate claims", errors.New("token issued in the future"))
 	}
 
 	if c.NotBefore != nil && c.NotBefore.After(time.Now()) {
-		return errors.New("token not yet valid")
+		return NewJWTError("validate claims", errors.New("token not yet valid"))
 	}
 
 	if len(c.Roles) == 0 {
-		return errors.New("no roles assigned")
+		return NewJWTError("validate claims", errors.New("no roles assigned"))
 	}
 
 	if c.Subject == "" {
-		return errors.New("subject is required")
+		return NewJWTError("validate claims", errors.New("subject is required"))
 	}
 
 	return nil

@@ -1,11 +1,15 @@
 package jwt
 
 import (
+	"crypto"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
 	"fmt"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -66,7 +70,7 @@ func (v *vaultStrategy) Sign(claims *domain.Claims) (string, error) {
 	defer v.mu.RUnlock()
 
 	if v.client == nil {
-		return "", domain.ErrInvalidClient
+		return "", domain.NewJWTError("sign token", domain.ErrInvalidClient)
 	}
 
 	// Create token
@@ -76,7 +80,8 @@ func (v *vaultStrategy) Sign(claims *domain.Claims) (string, error) {
 	// Get token string without signature
 	unsignedToken, err := token.SigningString()
 	if err != nil {
-		return "", domain.ErrTokenGeneration
+		v.logger.Error("failed to get signing string", zap.Error(err))
+		return "", domain.NewJWTError("sign token", domain.ErrTokenGeneration)
 	}
 
 	// Sign with Vault
@@ -87,17 +92,49 @@ func (v *vaultStrategy) Sign(claims *domain.Claims) (string, error) {
 
 	secret, err := v.client.Logical().Write(path, data)
 	if err != nil {
-		return "", domain.ErrTokenGeneration
+		v.logger.Error("failed to sign token with vault", zap.Error(err))
+		return "", domain.NewJWTError("sign token", domain.ErrTokenGeneration)
 	}
 
 	// Get signature from response
 	signature, ok := secret.Data["signature"].(string)
 	if !ok {
-		return "", domain.ErrTokenGeneration
+		v.logger.Error("invalid signature from vault")
+		return "", domain.NewJWTError("sign token", domain.ErrInvalidSignature)
 	}
 
+	// Remove any vault version prefix (e.g., "vault:v1:", "vault:v2:", etc.)
+	if strings.HasPrefix(signature, "vault:v") {
+		parts := strings.SplitN(signature, ":", 3)
+		if len(parts) == 3 {
+			signature = parts[2]
+		}
+	}
+
+	// Base64 decode the signature
+	decodedSignature, err := base64.StdEncoding.DecodeString(signature)
+	if err != nil {
+		v.logger.Error("failed to decode signature", zap.Error(err))
+		return "", domain.NewJWTError("sign token", domain.ErrInvalidSignature)
+	}
+
+	// Create a proper RSA signature
+	hash := sha256.New()
+	hash.Write([]byte(unsignedToken))
+	hashed := hash.Sum(nil)
+
+	// Verify the signature is valid RSA
+	err = rsa.VerifyPKCS1v15(v.GetPublicKey(), crypto.SHA256, hashed, decodedSignature)
+	if err != nil {
+		v.logger.Error("invalid RSA signature", zap.Error(err))
+		return "", domain.NewJWTError("sign token", domain.ErrInvalidSignature)
+	}
+
+	// Base64URL encode the signature (JWT standard)
+	encodedSignature := base64.RawURLEncoding.EncodeToString(decodedSignature)
+
 	// Combine token and signature
-	return fmt.Sprintf("%s.%s", unsignedToken, signature), nil
+	return fmt.Sprintf("%s.%s", unsignedToken, encodedSignature), nil
 }
 
 // GetPublicKey returns the public key from Vault
@@ -121,19 +158,29 @@ func (v *vaultStrategy) GetPublicKey() *rsa.PublicKey {
 	// Parse public key
 	keyData, ok := secret.Data["keys"].(map[string]interface{})
 	if !ok {
-		v.logger.Error("invalid key data from vault")
+		v.logger.Error("invalid key data from vault", zap.Any("data", secret.Data))
 		return nil
 	}
 
-	keyInfo, ok := keyData[v.keyID].(map[string]interface{})
+	// Get the latest version
+	var latestVersion int
+	for versionStr := range keyData {
+		version, err := strconv.Atoi(versionStr)
+		if err == nil && version > latestVersion {
+			latestVersion = version
+		}
+	}
+
+	// Get key info for the latest version
+	keyInfo, ok := keyData[strconv.Itoa(latestVersion)].(map[string]interface{})
 	if !ok {
-		v.logger.Error("invalid key info from vault")
+		v.logger.Error("invalid key info from vault", zap.Any("key_data", keyData))
 		return nil
 	}
 
 	publicKeyPEM, ok := keyInfo["public_key"].(string)
 	if !ok {
-		v.logger.Error("invalid public key from vault")
+		v.logger.Error("invalid public key from vault", zap.Any("key_info", keyInfo))
 		return nil
 	}
 
@@ -172,20 +219,47 @@ func (v *vaultStrategy) RotateKey() error {
 	defer v.mu.Unlock()
 
 	if v.client == nil {
-		return domain.ErrInvalidClient
+		return domain.NewJWTError("rotate key", domain.ErrInvalidClient)
 	}
 
-	// Rotate key in Vault
-	path := fmt.Sprintf("%s/keys/%s/rotate", v.config.MountPath, v.config.KeyName)
-	_, err := v.client.Logical().Write(path, nil)
+	// Get current key version from Vault
+	path := fmt.Sprintf("%s/keys/%s", v.config.MountPath, v.config.KeyName)
+	secret, err := v.client.Logical().Read(path)
 	if err != nil {
-		v.logger.Error("failed to rotate key in vault", zap.Error(err))
-		return domain.ErrInvalidKeyConfig
+		v.logger.Error("failed to get key info from vault", zap.Error(err))
+		return domain.NewJWTError("rotate key", domain.ErrInvalidKeyConfig)
 	}
 
-	// Update key ID and rotation time
-	v.keyID = fmt.Sprintf("vault-%d", time.Now().Unix())
-	v.lastRotation = time.Now()
+	// Get latest version
+	keys, ok := secret.Data["keys"].(map[string]interface{})
+	if !ok {
+		v.logger.Error("invalid key data from vault")
+		return domain.NewJWTError("rotate key", domain.ErrInvalidKeyConfig)
+	}
+
+	// Find the latest version
+	var latestVersion int
+	for versionStr := range keys {
+		version, err := strconv.Atoi(versionStr)
+		if err == nil && version > latestVersion {
+			latestVersion = version
+		}
+	}
+
+	// Only rotate if we don't have a key ID or if it's been more than 24 hours
+	if v.keyID == "" || time.Since(v.lastRotation) > 24*time.Hour {
+		// Rotate key in Vault
+		rotatePath := fmt.Sprintf("%s/keys/%s/rotate", v.config.MountPath, v.config.KeyName)
+		_, err := v.client.Logical().Write(rotatePath, nil)
+		if err != nil {
+			v.logger.Error("failed to rotate key in vault", zap.Error(err))
+			return domain.NewJWTError("rotate key", domain.ErrInvalidKeyConfig)
+		}
+
+		// Update key ID and rotation time
+		v.keyID = fmt.Sprintf("vault-%d", latestVersion+1)
+		v.lastRotation = time.Now()
+	}
 
 	return nil
 }
