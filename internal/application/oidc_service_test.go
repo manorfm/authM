@@ -2,7 +2,6 @@ package application
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
@@ -335,7 +334,7 @@ func TestOIDCService_Authorize(t *testing.T) {
 			mockSetup: func(m *mockOAuth2Repository) {
 				m.On("FindClientByID", mock.Anything, "invalid").Return(nil, domain.ErrInvalidClient)
 			},
-			expectedError: domain.ErrInvalidClient,
+			expectedError: domain.NewJWTError("authorize", domain.ErrInvalidClient),
 		},
 	}
 
@@ -403,7 +402,7 @@ func TestOIDCService_ExchangeCode(t *testing.T) {
 			mockSetup: func(m *mockOAuth2Repository) {
 				m.On("GetAuthorizationCode", mock.Anything, "invalid_code").Return(nil, domain.ErrInvalidAuthorizationCode)
 			},
-			expectedError: domain.ErrInvalidAuthorizationCode,
+			expectedError: domain.NewJWTError("exchange code", domain.ErrInvalidAuthorizationCode),
 		},
 	}
 
@@ -474,7 +473,7 @@ func TestOIDCService_GetOpenIDConfiguration(t *testing.T) {
 			mockSetup: func(m *mockOAuth2Repository) {
 				// No mock setup needed
 			},
-			expectedError: domain.ErrInvalidClient,
+			expectedError: domain.NewJWTError("get openid configuration", domain.ErrInvalidClient),
 		},
 	}
 
@@ -538,7 +537,7 @@ func TestOIDCService_RefreshToken(t *testing.T) {
 			mockSetup: func(m *mockUserRepository, _ interface{}) {
 				// No mock setup needed
 			},
-			expectedError: domain.ErrInvalidCredentials,
+			expectedError: domain.NewJWTError("refresh token", domain.ErrInvalidCredentials),
 		},
 		{
 			name:         "user not found",
@@ -547,7 +546,7 @@ func TestOIDCService_RefreshToken(t *testing.T) {
 				userID := ulid.MustParse("01ARZ3NDEKTSV4RRFFQ69G5FAV")
 				m.On("FindByID", mock.Anything, userID).Return(nil, domain.ErrUserNotFound).Once()
 			},
-			expectedError: domain.ErrInvalidCredentials,
+			expectedError: domain.NewJWTError("refresh token", domain.ErrInvalidCredentials),
 		},
 		{
 			name:         "invalid user ID in token",
@@ -555,7 +554,7 @@ func TestOIDCService_RefreshToken(t *testing.T) {
 			mockSetup: func(m *mockUserRepository, _ interface{}) {
 				// No mock setup needed
 			},
-			expectedError: fmt.Errorf("invalid user ID: %w", ulid.ErrDataSize),
+			expectedError: domain.NewJWTError("refresh token", domain.ErrInvalidUserID),
 		},
 		{
 			name:         "token generation error",
@@ -569,7 +568,7 @@ func TestOIDCService_RefreshToken(t *testing.T) {
 					Roles: []string{"user"},
 				}, nil)
 			},
-			expectedError: fmt.Errorf("failed to generate token pair: %w", domain.ErrTokenGeneration),
+			expectedError: domain.NewJWTError("refresh token", domain.ErrTokenGeneration),
 		},
 		{
 			name:         "expired token",
@@ -577,7 +576,7 @@ func TestOIDCService_RefreshToken(t *testing.T) {
 			mockSetup: func(m *mockUserRepository, _ interface{}) {
 				// No mock setup needed
 			},
-			expectedError: domain.ErrInvalidCredentials,
+			expectedError: domain.NewJWTError("refresh token", domain.ErrInvalidCredentials),
 		},
 	}
 

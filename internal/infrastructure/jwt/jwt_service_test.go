@@ -16,7 +16,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
-	"golang.org/x/time/rate"
 )
 
 func getJWTService(t *testing.T) JWTService {
@@ -49,45 +48,6 @@ func getJWTService(t *testing.T) JWTService {
 	service := NewJWTService(cfg, logger)
 	require.NotNil(t, service)
 
-	// Disable rate limiting for tests
-	service.(*jwtService).rateLimiter = rate.NewLimiter(rate.Inf, 0)
-	return service
-}
-
-// getJWTServiceWithRateLimit returns a JWT service with rate limiting enabled
-// This should only be used for rate limit specific tests
-func getJWTServiceWithRateLimit(t *testing.T, r rate.Limit, b int) JWTService {
-	// Create temporary directory for test keys
-	tempDir, err := os.MkdirTemp("", "jwt-test-*rl")
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		os.RemoveAll(tempDir)
-	})
-
-	logger, err := zap.NewDevelopment()
-	require.NoError(t, err)
-
-	cfg := &config.Config{
-		JWTAccessDuration:  domain.DefaultAccessTokenDuration,
-		JWTRefreshDuration: domain.DefaultRefreshTokenDuration,
-		JWTKeyPath:         filepath.Join(tempDir, "test-key"),
-		JWTKeyPassword:     "",
-		VaultAddress:       "http://localhost:8200",
-		VaultToken:         "test-token",
-		VaultMountPath:     "transit",
-		VaultKeyName:       "test-key",
-		VaultRoleName:      "test-role",
-		VaultAuthMethod:    "token",
-		VaultRetryCount:    3,
-		VaultRetryDelay:    time.Second,
-		VaultTimeout:       time.Second * 5,
-	}
-
-	service := NewJWTService(cfg, logger)
-	require.NotNil(t, service)
-
-	// Set custom rate limit
-	service.(*jwtService).rateLimiter = rate.NewLimiter(r, b)
 	return service
 }
 
@@ -261,22 +221,6 @@ func TestJWTService_GenerateTokenPair(t *testing.T) {
 
 		assert.True(t, refreshClaims.ExpiresAt.After(accessClaims.ExpiresAt.Time))
 	})
-
-	t.Run("rate limiting", func(t *testing.T) {
-		// Create a service with a very low rate limit (1 request per second, burst of 1)
-		limitedService := getJWTServiceWithRateLimit(t, 1, 1)
-		userID := ulid.Make()
-		roles := []string{"user"}
-
-		// First request should succeed
-		_, err := limitedService.GenerateTokenPair(userID, roles)
-		require.NoError(t, err)
-
-		// Second request should fail due to rate limit
-		_, err = limitedService.GenerateTokenPair(userID, roles)
-		assert.Error(t, err)
-		assert.ErrorIs(t, err, domain.ErrRateLimitExceeded)
-	})
 }
 
 func TestJWTService_GetJWKS(t *testing.T) {
@@ -312,19 +256,6 @@ func TestJWTService_GetJWKS(t *testing.T) {
 		assert.Equal(t, jwks1, jwks2)
 	})
 
-	t.Run("rate limiting", func(t *testing.T) {
-		// Create a service with a very low rate limit (1 request per second, burst of 1)
-		limitedService := getJWTServiceWithRateLimit(t, 1, 1)
-
-		// First request should succeed
-		_, err := limitedService.GetJWKS(context.Background())
-		require.NoError(t, err)
-
-		// Second request should fail due to rate limit
-		_, err = limitedService.GetJWKS(context.Background())
-		assert.Error(t, err)
-		assert.ErrorIs(t, err, domain.ErrRateLimitExceeded)
-	})
 }
 
 func TestJWTService_RotateKeys(t *testing.T) {
@@ -365,27 +296,6 @@ func TestJWTService_RotateKeys(t *testing.T) {
 		require.NoError(t, err)
 		keys := jwks["keys"].([]map[string]interface{})
 		assert.Len(t, keys, 1)
-	})
-
-	t.Run("rate limiting", func(t *testing.T) {
-		// Create a service with a very low rate limit (1 request per second, burst of 1)
-		limitedService := getJWTServiceWithRateLimit(t, 1, 1)
-
-		// First rotation should succeed
-		err := limitedService.RotateKeys()
-		require.NoError(t, err)
-
-		// Try to rotate keys again immediately - should fail due to rate limit
-		err = limitedService.RotateKeys()
-		assert.Error(t, err)
-		assert.ErrorIs(t, err, domain.ErrRateLimitExceeded)
-
-		// Wait for rate limit to reset
-		time.Sleep(time.Second)
-
-		// Should succeed again after waiting
-		err = limitedService.RotateKeys()
-		require.NoError(t, err)
 	})
 }
 

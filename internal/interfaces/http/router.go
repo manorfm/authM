@@ -13,6 +13,7 @@ import (
 	"github.com/ipede/user-manager-service/internal/infrastructure/repository"
 	"github.com/ipede/user-manager-service/internal/interfaces/http/handlers"
 	"github.com/ipede/user-manager-service/internal/interfaces/http/middleware/auth"
+	"github.com/ipede/user-manager-service/internal/interfaces/http/middleware/ratelimit"
 	httpSwagger "github.com/swaggo/http-swagger"
 	"go.uber.org/zap"
 )
@@ -42,6 +43,9 @@ func NewRouter(
 
 	// Swagger documentation
 	router := createRouter()
+
+	rateLimiter := ratelimit.NewRateLimiter(100, 200, 3*time.Minute)
+	router.Use(rateLimiter.Middleware)
 
 	router.Get("/swagger/*", httpSwagger.Handler(
 		httpSwagger.URL("http://localhost:8080/swagger/doc.json"),

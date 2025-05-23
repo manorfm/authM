@@ -14,7 +14,6 @@ import (
 	"github.com/ipede/user-manager-service/internal/infrastructure/config"
 	"github.com/oklog/ulid/v2"
 	"go.uber.org/zap"
-	"golang.org/x/time/rate"
 )
 
 // JWTService defines the interface for JWT operations
@@ -30,12 +29,11 @@ type JWTService interface {
 }
 
 type jwtService struct {
-	strategy    domain.JWTStrategy
-	logger      *zap.Logger
-	mu          sync.RWMutex
-	cache       *jwksCache
-	rateLimiter *rate.Limiter
-	blacklist   map[string]time.Time // tokenID -> expiration
+	strategy  domain.JWTStrategy
+	logger    *zap.Logger
+	mu        sync.RWMutex
+	cache     *jwksCache
+	blacklist map[string]time.Time // tokenID -> expiration
 }
 
 type jwksCache struct {
@@ -100,24 +98,16 @@ func NewJWTService(cfg *config.Config, logger *zap.Logger) JWTService {
 	// Create composite strategy
 	strategy := NewCompositeStrategy(vaultStrategy, localStrategy, logger)
 
-	// Create rate limiter: 100 requests per second with burst of 200
-	limiter := rate.NewLimiter(rate.Limit(100), 200)
-
 	return &jwtService{
-		strategy:    strategy,
-		logger:      logger,
-		cache:       newJWKSCache(),
-		rateLimiter: limiter,
-		blacklist:   make(map[string]time.Time),
+		strategy:  strategy,
+		logger:    logger,
+		cache:     newJWKSCache(),
+		blacklist: make(map[string]time.Time),
 	}
 }
 
 // ValidateToken validates a JWT token and returns the claims
 func (j *jwtService) ValidateToken(tokenString string) (*domain.Claims, error) {
-	// Check rate limit
-	if !j.rateLimiter.Allow() {
-		return nil, domain.ErrRateLimitExceeded
-	}
 
 	j.mu.RLock()
 	defer j.mu.RUnlock()
@@ -195,11 +185,6 @@ func (j *jwtService) ValidateToken(tokenString string) (*domain.Claims, error) {
 }
 
 func (j *jwtService) GetJWKS(ctx context.Context) (map[string]interface{}, error) {
-	// Check rate limit
-	if !j.rateLimiter.Allow() {
-		return nil, domain.ErrRateLimitExceeded
-	}
-
 	j.mu.RLock()
 	defer j.mu.RUnlock()
 
@@ -241,11 +226,6 @@ func (j *jwtService) GetJWKS(ctx context.Context) (map[string]interface{}, error
 
 // GenerateTokenPair generates a new pair of access and refresh tokens
 func (j *jwtService) GenerateTokenPair(userID ulid.ULID, roles []string) (*domain.TokenPair, error) {
-	// Check rate limit
-	if !j.rateLimiter.Allow() {
-		return nil, domain.ErrRateLimitExceeded
-	}
-
 	j.mu.RLock()
 	defer j.mu.RUnlock()
 
@@ -311,10 +291,6 @@ func (j *jwtService) GetPublicKey() *rsa.PublicKey {
 
 // RotateKeys rotates the JWT keys
 func (j *jwtService) RotateKeys() error {
-	// Check rate limit first
-	if !j.rateLimiter.Allow() {
-		return domain.ErrRateLimitExceeded
-	}
 
 	j.mu.Lock()
 	defer j.mu.Unlock()

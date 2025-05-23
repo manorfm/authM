@@ -46,7 +46,6 @@ var (
 	ErrInvalidKeyConfig     = errors.New("invalid key configuration")
 	ErrInvalidDuration      = errors.New("invalid token duration")
 	ErrTokenBlacklisted     = errors.New("token is blacklisted")
-	ErrRateLimitExceeded    = errors.New("rate limit exceeded")
 	ErrMalformedToken       = errors.New("malformed token")
 	ErrInvalidSignature     = errors.New("invalid signature")
 )

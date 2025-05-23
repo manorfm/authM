@@ -21,20 +21,6 @@ func NewAuthHandler(authService domain.AuthService, logger *zap.Logger) *Handler
 	}
 }
 
-// func validateRequest(w http.ResponseWriter, r *http.Request, req interface{}) error {
-// 	if err := json.NewDecoder(r.Body).Decode(req); err != nil {
-// 		http.Error(w, "Invalid request body", http.StatusBadRequest)
-// 		return err
-// 	}
-
-// 	var validate = validator.New()
-// 	if err := validate.Struct(req); err != nil {
-// 		http.Error(w, "Validation failed: "+err.Error(), http.StatusBadRequest)
-// 		return err
-// 	}
-// 	return nil
-// }
-
 func (h *HandlerAuth) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Email    string `json:"email"`
