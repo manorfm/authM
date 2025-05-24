@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ipede/user-manager-service/internal/domain"
+	"github.com/ipede/user-manager-service/internal/infrastructure/config"
 	"go.uber.org/zap"
 )
 
@@ -20,7 +21,51 @@ type compositeStrategy struct {
 }
 
 // NewCompositeStrategy creates a new composite strategy with fallback support
-func NewCompositeStrategy(vaultStrategy, localStrategy domain.JWTStrategy, logger *zap.Logger) domain.JWTStrategy {
+func NewCompositeStrategy(cfg *config.Config, logger *zap.Logger) domain.JWTStrategy {
+	// Create JWT configuration
+	jwtConfig := &domain.JWTConfig{
+		AccessDuration:  cfg.JWTAccessDuration,
+		RefreshDuration: cfg.JWTRefreshDuration,
+	}
+
+	// Validate JWT configuration
+	if err := jwtConfig.Validate(); err != nil {
+		logger.Fatal("Invalid JWT configuration", zap.Error(err))
+	}
+
+	// Create Vault strategy
+	vaultConfig := &domain.VaultConfig{
+		Address:         cfg.VaultAddress,
+		Token:           cfg.VaultToken,
+		MountPath:       cfg.VaultMountPath,
+		KeyName:         cfg.VaultKeyName,
+		RoleName:        cfg.VaultRoleName,
+		AuthMethod:      cfg.VaultAuthMethod,
+		RetryCount:      cfg.VaultRetryCount,
+		RetryDelay:      cfg.VaultRetryDelay,
+		Timeout:         cfg.VaultTimeout,
+		AccessDuration:  cfg.JWTAccessDuration,
+		RefreshDuration: cfg.JWTRefreshDuration,
+	}
+
+	vaultStrategy, err := NewVaultStrategy(vaultConfig, logger)
+	if err != nil {
+		logger.Warn("Failed to create Vault strategy, falling back to local strategy",
+			zap.Error(err))
+	}
+
+	// Create local strategy
+	localConfig := &domain.LocalConfig{
+		KeyPath:         cfg.JWTKeyPath,
+		AccessDuration:  cfg.JWTAccessDuration,
+		RefreshDuration: cfg.JWTRefreshDuration,
+	}
+
+	localStrategy, err := NewLocalStrategy(localConfig, logger)
+	if err != nil {
+		logger.Fatal("Failed to create local strategy", zap.Error(err))
+	}
+
 	return &compositeStrategy{
 		vaultStrategy: vaultStrategy,
 		localStrategy: localStrategy,
@@ -38,6 +83,7 @@ func (c *compositeStrategy) Sign(claims *domain.Claims) (string, error) {
 	if useVault {
 		token, err := c.vaultStrategy.Sign(claims)
 		if err == nil {
+			c.logger.Info("Signed token with Vault", zap.String("token", token))
 			return token, nil
 		}
 		c.logger.Warn("Failed to sign token with Vault, falling back to local strategy", zap.Error(err))
@@ -74,6 +120,7 @@ func (c *compositeStrategy) GetKeyID() string {
 	c.mu.RUnlock()
 
 	if useVault {
+		c.logger.Info("Key ID from Vault", zap.String("key_id", c.vaultStrategy.GetKeyID()))
 		return c.vaultStrategy.GetKeyID()
 	}
 	return c.localStrategy.GetKeyID()
@@ -88,6 +135,7 @@ func (c *compositeStrategy) RotateKey() error {
 	if useVault {
 		err := c.vaultStrategy.RotateKey()
 		if err == nil {
+			c.logger.Info("Rotated key in Vault")
 			return nil
 		}
 		c.logger.Warn("Failed to rotate key in Vault, falling back to local strategy", zap.Error(err))

@@ -88,7 +88,6 @@ func TestAuthService_Register(t *testing.T) {
 			JWTAccessDuration:  15 * time.Minute,
 			JWTRefreshDuration: 24 * time.Hour,
 			JWTKeyPath:         "test-key",
-			JWTKeyPassword:     "",
 			VaultAddress:       "http://localhost:8200",
 			VaultToken:         "test-token",
 			VaultMountPath:     "transit",
@@ -101,7 +100,8 @@ func TestAuthService_Register(t *testing.T) {
 			ServerPort:         8080,
 			ServerHost:         "localhost",
 		}
-		jwtService := jwt.NewJWTService(cfg, logger)
+		strategy := jwt.NewCompositeStrategy(cfg, logger)
+		jwtService := jwt.NewJWTService(strategy, logger)
 		service := NewAuthService(repo, jwtService, logger)
 
 		repo.On("ExistsByEmail", ctx, "test@example.com").Return(false, nil)
@@ -130,7 +130,6 @@ func TestAuthService_Register(t *testing.T) {
 			JWTAccessDuration:  15 * time.Minute,
 			JWTRefreshDuration: 24 * time.Hour,
 			JWTKeyPath:         "test-key",
-			JWTKeyPassword:     "",
 			VaultAddress:       "http://localhost:8200",
 			VaultToken:         "test-token",
 			VaultMountPath:     "transit",
@@ -143,7 +142,8 @@ func TestAuthService_Register(t *testing.T) {
 			ServerPort:         8080,
 			ServerHost:         "localhost",
 		}
-		jwtService := jwt.NewJWTService(cfg, logger)
+		strategy := jwt.NewCompositeStrategy(cfg, logger)
+		jwtService := jwt.NewJWTService(strategy, logger)
 		service := NewAuthService(repo, jwtService, logger)
 
 		repo.On("ExistsByEmail", ctx, "test@example.com").Return(true, nil)
@@ -165,7 +165,6 @@ func TestAuthService_Register(t *testing.T) {
 			JWTAccessDuration:  15 * time.Minute,
 			JWTRefreshDuration: 24 * time.Hour,
 			JWTKeyPath:         "test-key",
-			JWTKeyPassword:     "",
 			VaultAddress:       "http://localhost:8200",
 			VaultToken:         "test-token",
 			VaultMountPath:     "transit",
@@ -178,7 +177,8 @@ func TestAuthService_Register(t *testing.T) {
 			ServerPort:         8080,
 			ServerHost:         "localhost",
 		}
-		jwtService := jwt.NewJWTService(cfg, logger)
+		strategy := jwt.NewCompositeStrategy(cfg, logger)
+		jwtService := jwt.NewJWTService(strategy, logger)
 		service := NewAuthService(repo, jwtService, logger)
 
 		repo.On("ExistsByEmail", ctx, "test@example.com").Return(false, assert.AnError)
@@ -200,7 +200,6 @@ func TestAuthService_Register(t *testing.T) {
 			JWTAccessDuration:  15 * time.Minute,
 			JWTRefreshDuration: 24 * time.Hour,
 			JWTKeyPath:         "test-key",
-			JWTKeyPassword:     "",
 			VaultAddress:       "http://localhost:8200",
 			VaultToken:         "test-token",
 			VaultMountPath:     "transit",
@@ -213,7 +212,8 @@ func TestAuthService_Register(t *testing.T) {
 			ServerPort:         8080,
 			ServerHost:         "localhost",
 		}
-		jwtService := jwt.NewJWTService(cfg, logger)
+		strategy := jwt.NewCompositeStrategy(cfg, logger)
+		jwtService := jwt.NewJWTService(strategy, logger)
 		service := NewAuthService(repo, jwtService, logger)
 
 		repo.On("ExistsByEmail", ctx, "test@example.com").Return(false, nil)
@@ -291,7 +291,6 @@ func TestAuthService_Login(t *testing.T) {
 				JWTAccessDuration:  15 * time.Minute,
 				JWTRefreshDuration: 24 * time.Hour,
 				JWTKeyPath:         "test-key",
-				JWTKeyPassword:     "",
 				VaultAddress:       "http://localhost:8200",
 				VaultToken:         "test-token",
 				VaultMountPath:     "transit",
@@ -304,7 +303,8 @@ func TestAuthService_Login(t *testing.T) {
 				ServerPort:         8080,
 				ServerHost:         "localhost",
 			}
-			jwtService := jwt.NewJWTService(cfg, zap.NewNop())
+			strategy := jwt.NewCompositeStrategy(cfg, zap.NewNop())
+			jwtService := jwt.NewJWTService(strategy, zap.NewNop())
 			service := NewAuthService(repo, jwtService, zap.NewNop())
 
 			tt.mockSetup(repo)

@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -15,6 +17,7 @@ import (
 	"github.com/oklog/ulid/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
 
@@ -45,6 +48,36 @@ func (m *MockJWT) GetJWKS(ctx context.Context) (map[string]interface{}, error) {
 
 func (m *MockJWT) GetPublicKey() *rsa.PublicKey {
 	return nil
+}
+
+func (m *MockJWT) BlacklistToken(tokenID string, expiresAt time.Time) error {
+	args := m.Called(tokenID, expiresAt)
+	return args.Error(0)
+}
+
+func (m *MockJWT) IsTokenBlacklisted(tokenID string) bool {
+	args := m.Called(tokenID)
+	return args.Bool(0)
+}
+
+func (m *MockJWT) RotateKeys() error {
+	args := m.Called()
+	return args.Error(0)
+}
+
+func (m *MockJWT) TryVault() error {
+	args := m.Called()
+	return args.Error(0)
+}
+
+func (m *MockJWT) GetLastRotation() time.Time {
+	args := m.Called()
+	return args.Get(0).(time.Time)
+}
+
+func (m *MockJWT) GetAccessDuration() time.Duration {
+	args := m.Called()
+	return args.Get(0).(time.Duration)
 }
 
 func TestAuthMiddleware_Authenticator(t *testing.T) {
@@ -147,6 +180,13 @@ func TestAuthMiddleware_RequireRole(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Create temporary directory for test keys
+			tempDir, err := os.MkdirTemp("", "jwt-test-*")
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				os.RemoveAll(tempDir)
+			})
+
 			// Create a real JWT instance for the middleware
 			cfg := &config.Config{
 				DBHost:             "localhost",
@@ -156,8 +196,7 @@ func TestAuthMiddleware_RequireRole(t *testing.T) {
 				DBName:             "user_manager_test",
 				JWTAccessDuration:  15 * time.Minute,
 				JWTRefreshDuration: 24 * time.Hour,
-				JWTKeyPath:         "test-key",
-				JWTKeyPassword:     "",
+				JWTKeyPath:         filepath.Join(tempDir, "test-key"),
 				VaultAddress:       "http://localhost:8200",
 				VaultToken:         "test-token",
 				VaultMountPath:     "transit",
@@ -170,9 +209,10 @@ func TestAuthMiddleware_RequireRole(t *testing.T) {
 				ServerPort:         8080,
 				ServerHost:         "localhost",
 			}
-			realJWT := jwt.NewJWTService(cfg, logger)
+			strategy := jwt.NewCompositeStrategy(cfg, logger)
+			realJWT := jwt.NewJWTService(strategy, logger)
 
-			middleware := NewAuthMiddleware(realJWT, zap.NewNop())
+			middleware := NewAuthMiddleware(realJWT, logger)
 
 			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
@@ -218,35 +258,42 @@ func TestAuthMiddleware_ExtractToken(t *testing.T) {
 		},
 	}
 
-	// Create a real JWT instance for the middleware
-	cfg := &config.Config{
-		DBHost:             "localhost",
-		DBPort:             5432,
-		DBUser:             "postgres",
-		DBPassword:         "postgres",
-		DBName:             "user_manager_test",
-		JWTAccessDuration:  15 * time.Minute,
-		JWTRefreshDuration: 24 * time.Hour,
-		JWTKeyPath:         "test-key",
-		JWTKeyPassword:     "",
-		VaultAddress:       "http://localhost:8200",
-		VaultToken:         "test-token",
-		VaultMountPath:     "transit",
-		VaultKeyName:       "test-key",
-		VaultRoleName:      "test-role",
-		VaultAuthMethod:    "token",
-		VaultRetryCount:    3,
-		VaultRetryDelay:    time.Second,
-		VaultTimeout:       time.Second * 5,
-		ServerPort:         8080,
-		ServerHost:         "localhost",
-	}
-	realJWT := jwt.NewJWTService(cfg, logger)
-
-	middleware := NewAuthMiddleware(realJWT, logger)
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Create temporary directory for test keys
+			tempDir, err := os.MkdirTemp("", "jwt-test-*")
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				os.RemoveAll(tempDir)
+			})
+
+			// Create a real JWT instance for the middleware
+			cfg := &config.Config{
+				DBHost:             "localhost",
+				DBPort:             5432,
+				DBUser:             "postgres",
+				DBPassword:         "postgres",
+				DBName:             "user_manager_test",
+				JWTAccessDuration:  15 * time.Minute,
+				JWTRefreshDuration: 24 * time.Hour,
+				JWTKeyPath:         filepath.Join(tempDir, "test-key"),
+				VaultAddress:       "http://localhost:8200",
+				VaultToken:         "test-token",
+				VaultMountPath:     "transit",
+				VaultKeyName:       "test-key",
+				VaultRoleName:      "test-role",
+				VaultAuthMethod:    "token",
+				VaultRetryCount:    3,
+				VaultRetryDelay:    time.Second,
+				VaultTimeout:       time.Second * 5,
+				ServerPort:         8080,
+				ServerHost:         "localhost",
+			}
+			strategy := jwt.NewCompositeStrategy(cfg, logger)
+			realJWT := jwt.NewJWTService(strategy, logger)
+
+			middleware := NewAuthMiddleware(realJWT, logger)
+
 			req := httptest.NewRequest("GET", "/", nil)
 			if tt.authHeader != "" {
 				req.Header.Set("Authorization", tt.authHeader)

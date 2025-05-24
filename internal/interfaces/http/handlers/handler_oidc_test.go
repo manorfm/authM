@@ -12,7 +12,7 @@ import (
 
 	"github.com/ipede/user-manager-service/internal/domain"
 	"github.com/ipede/user-manager-service/internal/infrastructure/config"
-	jwtinfra "github.com/ipede/user-manager-service/internal/infrastructure/jwt"
+	"github.com/ipede/user-manager-service/internal/infrastructure/jwt"
 	httperrors "github.com/ipede/user-manager-service/internal/interfaces/http/errors"
 	"github.com/oklog/ulid/v2"
 	"github.com/stretchr/testify/assert"
@@ -229,7 +229,7 @@ func (m *mockOIDCService) Authorize(ctx context.Context, clientID, redirectURI, 
 	return args.String(0), args.Error(1)
 }
 
-func getJWTService(t *testing.T) jwtinfra.JWTService {
+func getJWTService(t *testing.T) domain.JWTService {
 	logger := zap.NewNop()
 	cfg := &config.Config{
 		DBHost:             "localhost",
@@ -240,7 +240,6 @@ func getJWTService(t *testing.T) jwtinfra.JWTService {
 		JWTAccessDuration:  15 * time.Minute,
 		JWTRefreshDuration: 24 * time.Hour,
 		JWTKeyPath:         "test-key",
-		JWTKeyPassword:     "",
 		VaultAddress:       "http://localhost:8200",
 		VaultToken:         "test-token",
 		VaultMountPath:     "transit",
@@ -253,7 +252,8 @@ func getJWTService(t *testing.T) jwtinfra.JWTService {
 		ServerPort:         8080,
 		ServerHost:         "localhost",
 	}
-	return jwtinfra.NewJWTService(cfg, logger)
+	strategy := jwt.NewCompositeStrategy(cfg, logger)
+	return jwt.NewJWTService(strategy, logger)
 }
 
 func TestHandleOpenIDConfiguration(t *testing.T) {
@@ -443,6 +443,30 @@ func (m *mockJWTService) GetPublicKey() *rsa.PublicKey {
 
 func (m *mockJWTService) GenerateTokenPair(userID ulid.ULID, roles []string) (*domain.TokenPair, error) {
 	return nil, nil
+}
+
+func (m *mockJWTService) BlacklistToken(tokenID string, expiresAt time.Time) error {
+	return nil
+}
+
+func (m *mockJWTService) IsTokenBlacklisted(tokenID string) bool {
+	return false
+}
+
+func (m *mockJWTService) RotateKeys() error {
+	return nil
+}
+
+func (m *mockJWTService) TryVault() error {
+	return nil
+}
+
+func (m *mockJWTService) GetLastRotation() time.Time {
+	return time.Now()
+}
+
+func (m *mockJWTService) GetAccessDuration() time.Duration {
+	return domain.DefaultAccessTokenDuration
 }
 
 func TestHandleAuthorize(t *testing.T) {

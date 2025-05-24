@@ -1,9 +1,7 @@
 package jwt
 
 import (
-	"crypto"
 	"crypto/rsa"
-	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
@@ -56,10 +54,16 @@ func NewVaultStrategy(config *domain.VaultConfig, logger *zap.Logger) (domain.JW
 		lastRotation: time.Now(),
 	}
 
-	// Initialize key ID
-	if err := strategy.RotateKey(); err != nil {
+	// Apenas carrega o key ID atual sem rotacionar
+	if err := strategy.loadCurrentKeyID(); err != nil {
+		logger.Error("Failed to load key ID from Vault", zap.Error(err))
 		return nil, domain.ErrInvalidKeyConfig
 	}
+
+	// // Initialize key ID
+	// if err := strategy.RotateKey(); err != nil {
+	// 	return nil, domain.ErrInvalidKeyConfig
+	// }
 
 	return strategy, nil
 }
@@ -115,18 +119,6 @@ func (v *vaultStrategy) Sign(claims *domain.Claims) (string, error) {
 	decodedSignature, err := base64.StdEncoding.DecodeString(signature)
 	if err != nil {
 		v.logger.Error("failed to decode signature", zap.Error(err))
-		return "", domain.NewJWTError("sign token", domain.ErrInvalidSignature)
-	}
-
-	// Create a proper RSA signature
-	hash := sha256.New()
-	hash.Write([]byte(unsignedToken))
-	hashed := hash.Sum(nil)
-
-	// Verify the signature is valid RSA
-	err = rsa.VerifyPKCS1v15(v.GetPublicKey(), crypto.SHA256, hashed, decodedSignature)
-	if err != nil {
-		v.logger.Error("invalid RSA signature", zap.Error(err))
 		return "", domain.NewJWTError("sign token", domain.ErrInvalidSignature)
 	}
 
@@ -285,4 +277,37 @@ func (v *vaultStrategy) GetRefreshDuration() time.Duration {
 		return v.config.RefreshDuration
 	}
 	return domain.DefaultRefreshTokenDuration
+}
+
+func (v *vaultStrategy) loadCurrentKeyID() error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	path := fmt.Sprintf("%s/keys/%s", v.config.MountPath, v.config.KeyName)
+	secret, err := v.client.Logical().Read(path)
+	if err != nil {
+		v.logger.Error("failed to read key metadata from vault", zap.Error(err))
+		return err
+	}
+
+	keys, ok := secret.Data["keys"].(map[string]interface{})
+	if !ok {
+		v.logger.Error("unexpected Vault key metadata format", zap.Any("data", secret.Data))
+		return domain.ErrInvalidKeyConfig
+	}
+
+	var latestVersion int
+	for versionStr := range keys {
+		version, err := strconv.Atoi(versionStr)
+		if err == nil && version > latestVersion {
+			latestVersion = version
+		}
+	}
+
+	// Set keyID based on latest version
+	v.keyID = fmt.Sprintf("vault-%d", latestVersion)
+	v.lastRotation = time.Now()
+
+	v.logger.Info("Loaded Vault key ID", zap.String("key_id", v.keyID))
+	return nil
 }

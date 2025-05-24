@@ -1,9 +1,11 @@
 package jwt
 
 import (
+	"bytes"
 	"context"
 	"crypto/rsa"
 	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"sync"
@@ -11,22 +13,9 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/ipede/user-manager-service/internal/domain"
-	"github.com/ipede/user-manager-service/internal/infrastructure/config"
 	"github.com/oklog/ulid/v2"
 	"go.uber.org/zap"
 )
-
-// JWTService defines the interface for JWT operations
-type JWTService interface {
-	ValidateToken(tokenString string) (*domain.Claims, error)
-	GetJWKS(ctx context.Context) (map[string]interface{}, error)
-	GenerateTokenPair(userID ulid.ULID, roles []string) (*domain.TokenPair, error)
-	GetPublicKey() *rsa.PublicKey
-	RotateKeys() error
-	BlacklistToken(tokenID string, expiresAt time.Time) error
-	IsTokenBlacklisted(tokenID string) bool
-	TryVault() error
-}
 
 type jwtService struct {
 	strategy  domain.JWTStrategy
@@ -49,54 +38,55 @@ func newJWKSCache() *jwksCache {
 	}
 }
 
-func NewJWTService(cfg *config.Config, logger *zap.Logger) JWTService {
-	// Create JWT configuration
-	jwtConfig := &domain.JWTConfig{
-		AccessDuration:  cfg.JWTAccessDuration,
-		RefreshDuration: cfg.JWTRefreshDuration,
-	}
+func NewJWTService(strategy domain.JWTStrategy, logger *zap.Logger) domain.JWTService {
+	/*
+		// Create JWT configuration
+		jwtConfig := &domain.JWTConfig{
+			AccessDuration:  cfg.JWTAccessDuration,
+			RefreshDuration: cfg.JWTRefreshDuration,
+		}
 
-	// Validate JWT configuration
-	if err := jwtConfig.Validate(); err != nil {
-		logger.Fatal("Invalid JWT configuration", zap.Error(err))
-	}
+		// Validate JWT configuration
+		if err := jwtConfig.Validate(); err != nil {
+			logger.Fatal("Invalid JWT configuration", zap.Error(err))
+		}
 
-	// Create Vault strategy
-	vaultConfig := &domain.VaultConfig{
-		Address:         cfg.VaultAddress,
-		Token:           cfg.VaultToken,
-		MountPath:       cfg.VaultMountPath,
-		KeyName:         cfg.VaultKeyName,
-		RoleName:        cfg.VaultRoleName,
-		AuthMethod:      cfg.VaultAuthMethod,
-		RetryCount:      cfg.VaultRetryCount,
-		RetryDelay:      cfg.VaultRetryDelay,
-		Timeout:         cfg.VaultTimeout,
-		AccessDuration:  cfg.JWTAccessDuration,
-		RefreshDuration: cfg.JWTRefreshDuration,
-	}
+		// Create Vault strategy
+		vaultConfig := &domain.VaultConfig{
+			Address:         cfg.VaultAddress,
+			Token:           cfg.VaultToken,
+			MountPath:       cfg.VaultMountPath,
+			KeyName:         cfg.VaultKeyName,
+			RoleName:        cfg.VaultRoleName,
+			AuthMethod:      cfg.VaultAuthMethod,
+			RetryCount:      cfg.VaultRetryCount,
+			RetryDelay:      cfg.VaultRetryDelay,
+			Timeout:         cfg.VaultTimeout,
+			AccessDuration:  cfg.JWTAccessDuration,
+			RefreshDuration: cfg.JWTRefreshDuration,
+		}
 
-	vaultStrategy, err := NewVaultStrategy(vaultConfig, logger)
-	if err != nil {
-		logger.Warn("Failed to create Vault strategy, falling back to local strategy",
-			zap.Error(err))
-	}
+		vaultStrategy, err := NewVaultStrategy(vaultConfig, logger)
+		if err != nil {
+			logger.Warn("Failed to create Vault strategy, falling back to local strategy",
+				zap.Error(err))
+		}
 
-	// Create local strategy
-	localConfig := &domain.LocalConfig{
-		KeyPath:         cfg.JWTKeyPath,
-		KeyPassword:     cfg.JWTKeyPassword,
-		AccessDuration:  cfg.JWTAccessDuration,
-		RefreshDuration: cfg.JWTRefreshDuration,
-	}
+		// Create local strategy
+		localConfig := &domain.LocalConfig{
+			KeyPath:         cfg.JWTKeyPath,
+			AccessDuration:  cfg.JWTAccessDuration,
+			RefreshDuration: cfg.JWTRefreshDuration,
+		}
 
-	localStrategy, err := NewLocalStrategy(localConfig, logger)
-	if err != nil {
-		logger.Fatal("Failed to create local strategy", zap.Error(err))
-	}
+		localStrategy, err := NewLocalStrategy(localConfig, logger)
+		if err != nil {
+			logger.Fatal("Failed to create local strategy", zap.Error(err))
+		}
 
-	// Create composite strategy
-	strategy := NewCompositeStrategy(vaultStrategy, localStrategy, logger)
+		// Create composite strategy
+		strategy := NewCompositeStrategy(vaultStrategy, localStrategy, logger)
+	*/
 
 	return &jwtService{
 		strategy:  strategy,
@@ -116,12 +106,14 @@ func (j *jwtService) ValidateToken(tokenString string) (*domain.Claims, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &domain.Claims{}, func(token *jwt.Token) (interface{}, error) {
 		// Verify signing method
 		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
+			j.logger.Error("Invalid signing method", zap.String("token_id", tokenString))
 			return nil, domain.ErrInvalidSigningMethod
 		}
 
 		// Get public key
 		publicKey := j.strategy.GetPublicKey()
 		if publicKey == nil {
+			j.logger.Error("Invalid public key", zap.String("token_id", tokenString))
 			return nil, domain.ErrInvalidToken
 		}
 
@@ -206,8 +198,7 @@ func (j *jwtService) GetJWKS(ctx context.Context) (map[string]interface{}, error
 
 	jwk, err := convertToJWK(publicKey, j.strategy.GetKeyID())
 	if err != nil {
-		j.logger.Error("Failed to convert public key to JWK",
-			zap.Error(err))
+		j.logger.Error("Failed to convert public key to JWK", zap.Error(err))
 		return nil, domain.ErrInvalidKeyConfig
 	}
 
@@ -356,7 +347,10 @@ func convertToJWK(publicKey *rsa.PublicKey, kid string) (map[string]interface{},
 	// Convert modulus and exponent to Base64URL without padding
 	modulusBytes := publicKey.N.Bytes()
 	nStr := base64.RawURLEncoding.EncodeToString(modulusBytes)
-	eBytes := []byte{byte(publicKey.E)}
+
+	eBytes := make([]byte, 4)
+	binary.BigEndian.PutUint32(eBytes, uint32(publicKey.E))
+	eBytes = bytes.TrimLeft(eBytes, "\x00")
 	eStr := base64.RawURLEncoding.EncodeToString(eBytes)
 
 	return map[string]interface{}{

@@ -18,7 +18,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func getJWTService(t *testing.T) JWTService {
+func getJWTService(t *testing.T) domain.JWTService {
 	// Create temporary directory for test keys
 	tempDir, err := os.MkdirTemp("", "jwt-test-*")
 	require.NoError(t, err)
@@ -33,7 +33,6 @@ func getJWTService(t *testing.T) JWTService {
 		JWTAccessDuration:  domain.DefaultAccessTokenDuration,
 		JWTRefreshDuration: domain.DefaultRefreshTokenDuration,
 		JWTKeyPath:         filepath.Join(tempDir, "test-key"),
-		JWTKeyPassword:     "",
 		VaultAddress:       "http://localhost:8200",
 		VaultToken:         "test-token",
 		VaultMountPath:     "transit",
@@ -45,7 +44,8 @@ func getJWTService(t *testing.T) JWTService {
 		VaultTimeout:       time.Second * 5,
 	}
 
-	service := NewJWTService(cfg, logger)
+	strategy := NewCompositeStrategy(cfg, logger)
+	service := NewJWTService(strategy, logger)
 	require.NotNil(t, service)
 
 	return service
@@ -79,12 +79,13 @@ func TestJWTService_ValidateToken(t *testing.T) {
 		// Create a token with a very short expiration
 		tempDir, err := os.MkdirTemp("", "jwt-test-expired-*")
 		require.NoError(t, err)
-		defer os.RemoveAll(tempDir)
+		t.Cleanup(func() {
+			os.RemoveAll(tempDir)
+		})
 		cfg := &config.Config{
 			JWTAccessDuration:  1 * time.Millisecond, // Very short duration
 			JWTRefreshDuration: 1 * time.Hour,
 			JWTKeyPath:         filepath.Join(tempDir, "test-key"),
-			JWTKeyPassword:     "",
 			VaultAddress:       "http://localhost:8200",
 			VaultToken:         "test-token",
 			VaultMountPath:     "transit",
@@ -96,7 +97,8 @@ func TestJWTService_ValidateToken(t *testing.T) {
 			VaultTimeout:       time.Second * 5,
 		}
 		t.Log("Configuração criada")
-		expiredService := NewJWTService(cfg, zap.NewNop())
+		strategy := NewCompositeStrategy(cfg, zap.NewNop())
+		expiredService := NewJWTService(strategy, zap.NewNop())
 		t.Log("Serviço JWT criado")
 		tokenPair, err := expiredService.GenerateTokenPair(userID, roles)
 		if err != nil {

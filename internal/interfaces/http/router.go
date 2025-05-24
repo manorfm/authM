@@ -28,7 +28,8 @@ func NewRouter(
 	logger *zap.Logger,
 ) *Router {
 
-	jwtService := jwt.NewJWTService(cfg, logger)
+	strategy := jwt.NewCompositeStrategy(cfg, logger)
+	jwtService := jwt.NewJWTService(strategy, logger)
 	authMiddleware := auth.NewAuthMiddleware(jwtService, logger)
 	userRepo := repository.NewUserRepository(db)
 	oauthRepo := repository.NewOAuth2Repository(db, logger)

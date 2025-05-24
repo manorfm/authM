@@ -9,6 +9,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/ipede/user-manager-service/internal/domain"
+	"github.com/ipede/user-manager-service/internal/infrastructure/config"
 	"github.com/oklog/ulid/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -50,7 +51,9 @@ func TestLocalStrategy(t *testing.T) {
 	// Create temporary directory for test keys
 	tempDir, err := os.MkdirTemp("", "jwt-test-*")
 	require.NoError(t, err)
-	defer os.RemoveAll(tempDir)
+	t.Cleanup(func() {
+		os.RemoveAll(tempDir)
+	})
 
 	logger, err := zap.NewDevelopment()
 	require.NoError(t, err)
@@ -132,26 +135,31 @@ func TestCompositeStrategy(t *testing.T) {
 	// Create temporary directory for test keys
 	tempDir, err := os.MkdirTemp("", "jwt-test-*")
 	require.NoError(t, err)
-	defer os.RemoveAll(tempDir)
+	t.Cleanup(func() {
+		os.RemoveAll(tempDir)
+	})
 
 	logger, err := zap.NewDevelopment()
 	require.NoError(t, err)
 
-	// Create local strategy
-	localConfig := &domain.LocalConfig{
-		KeyPath:         filepath.Join(tempDir, "test-key"),
-		KeyPassword:     "",
-		AccessDuration:  domain.DefaultAccessTokenDuration,
-		RefreshDuration: domain.DefaultRefreshTokenDuration,
+	// Create test config
+	cfg := &config.Config{
+		JWTAccessDuration:  domain.DefaultAccessTokenDuration,
+		JWTRefreshDuration: domain.DefaultRefreshTokenDuration,
+		JWTKeyPath:         filepath.Join(tempDir, "test-key"),
+		VaultAddress:       "http://localhost:8200",
+		VaultToken:         "test-token",
+		VaultMountPath:     "transit",
+		VaultKeyName:       "test-key",
+		VaultRoleName:      "test-role",
+		VaultAuthMethod:    "token",
+		VaultRetryCount:    3,
+		VaultRetryDelay:    time.Second,
+		VaultTimeout:       time.Second * 5,
 	}
-	localStrategy, err := NewLocalStrategy(localConfig, logger)
-	require.NoError(t, err)
-
-	// Create mock Vault strategy that always fails
-	mockVault := &mockVaultStrategy{}
 
 	// Create composite strategy
-	strategy := NewCompositeStrategy(mockVault, localStrategy, logger)
+	strategy := NewCompositeStrategy(cfg, logger)
 
 	t.Run("fallback to local strategy", func(t *testing.T) {
 		// Create claims
@@ -187,28 +195,10 @@ func TestCompositeStrategy(t *testing.T) {
 	t.Run("try vault after fallback", func(t *testing.T) {
 		// Try to switch back to Vault
 		err := strategy.(*compositeStrategy).TryVault()
-		assert.Error(t, err) // Should fail because mock Vault is not available
+		assert.Error(t, err) // Should fail because Vault is not available
 	})
 
-	t.Run("token durations with vault", func(t *testing.T) {
-		// Create mock Vault strategy that succeeds
-		mockVault := &mockVaultStrategy{}
-		strategy := NewCompositeStrategy(mockVault, localStrategy, logger)
-
-		assert.Equal(t, domain.DefaultAccessTokenDuration, strategy.GetAccessDuration())
-		assert.Equal(t, domain.DefaultRefreshTokenDuration, strategy.GetRefreshDuration())
-	})
-
-	t.Run("token durations with local fallback", func(t *testing.T) {
-		// Create mock Vault strategy that fails
-		mockVault := &mockVaultStrategy{}
-		strategy := NewCompositeStrategy(mockVault, localStrategy, logger)
-
-		// Force fallback to local strategy
-		_, err := strategy.Sign(&domain.Claims{})
-		// Não deve dar erro, pois o fallback local é funcional
-		assert.NoError(t, err)
-
+	t.Run("token durations", func(t *testing.T) {
 		assert.Equal(t, domain.DefaultAccessTokenDuration, strategy.GetAccessDuration())
 		assert.Equal(t, domain.DefaultRefreshTokenDuration, strategy.GetRefreshDuration())
 	})

@@ -58,3 +58,4 @@ migrations/*.log
 # Build output
 bin/
 dist/
+test-key

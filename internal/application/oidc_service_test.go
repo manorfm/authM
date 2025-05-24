@@ -158,6 +158,30 @@ func (m *mockJWTRefresh) GenerateTokenPair(userID ulid.ULID, roles []string) (*d
 	}, nil
 }
 
+func (m *mockJWTRefresh) BlacklistToken(tokenID string, expiresAt time.Time) error {
+	return nil
+}
+
+func (m *mockJWTRefresh) IsTokenBlacklisted(tokenID string) bool {
+	return false
+}
+
+func (m *mockJWTRefresh) RotateKeys() error {
+	return nil
+}
+
+func (m *mockJWTRefresh) TryVault() error {
+	return nil
+}
+
+func (m *mockJWTRefresh) GetLastRotation() time.Time {
+	return time.Now()
+}
+
+func (m *mockJWTRefresh) GetAccessDuration() time.Duration {
+	return domain.DefaultAccessTokenDuration
+}
+
 // Mock JWT para simular erro de validação
 type mockJWTError struct{}
 
@@ -175,6 +199,22 @@ func (m *mockJWTError) GetJWKS(ctx context.Context) (map[string]interface{}, err
 
 func (m *mockJWTError) GenerateTokenPair(userID ulid.ULID, roles []string) (*domain.TokenPair, error) {
 	return nil, nil
+}
+
+func (m *mockJWTError) BlacklistToken(tokenID string, expiresAt time.Time) error {
+	return nil
+}
+
+func (m *mockJWTError) IsTokenBlacklisted(tokenID string) bool {
+	return false
+}
+
+func (m *mockJWTError) RotateKeys() error {
+	return nil
+}
+
+func (m *mockJWTError) TryVault() error {
+	return nil
 }
 
 // Mock JWT para simular erro de parsing do userID
@@ -201,6 +241,22 @@ func (m *mockJWTInvalidUserID) GenerateTokenPair(userID ulid.ULID, roles []strin
 	return nil, nil
 }
 
+func (m *mockJWTInvalidUserID) BlacklistToken(tokenID string, expiresAt time.Time) error {
+	return nil
+}
+
+func (m *mockJWTInvalidUserID) IsTokenBlacklisted(tokenID string) bool {
+	return false
+}
+
+func (m *mockJWTInvalidUserID) RotateKeys() error {
+	return nil
+}
+
+func (m *mockJWTInvalidUserID) TryVault() error {
+	return nil
+}
+
 // Mock JWT para simular erro de geração de token
 type mockJWTTokenGenError struct{}
 
@@ -223,6 +279,22 @@ func (m *mockJWTTokenGenError) GetJWKS(ctx context.Context) (map[string]interfac
 
 func (m *mockJWTTokenGenError) GenerateTokenPair(userID ulid.ULID, roles []string) (*domain.TokenPair, error) {
 	return nil, domain.ErrTokenGeneration
+}
+
+func (m *mockJWTTokenGenError) BlacklistToken(tokenID string, expiresAt time.Time) error {
+	return nil
+}
+
+func (m *mockJWTTokenGenError) IsTokenBlacklisted(tokenID string) bool {
+	return false
+}
+
+func (m *mockJWTTokenGenError) RotateKeys() error {
+	return nil
+}
+
+func (m *mockJWTTokenGenError) TryVault() error {
+	return nil
 }
 
 func TestOIDCService_GetUserInfo(t *testing.T) {

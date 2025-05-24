@@ -7,7 +7,6 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"sync"
@@ -109,7 +108,7 @@ func (l *localStrategy) generateKeyPair() error {
 	})
 
 	// Write private key to file
-	if err := ioutil.WriteFile(l.config.KeyPath, privateKeyPEM, 0600); err != nil {
+	if err := os.WriteFile(l.config.KeyPath, privateKeyPEM, 0600); err != nil {
 		return domain.ErrInvalidKeyConfig
 	}
 
