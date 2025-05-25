@@ -31,11 +31,6 @@ type VaultConfig struct {
 	Token           string
 	MountPath       string
 	KeyName         string
-	RoleName        string
-	AuthMethod      string
-	RetryCount      int
-	RetryDelay      time.Duration
-	Timeout         time.Duration
 	AccessDuration  time.Duration
 	RefreshDuration time.Duration
 }
@@ -43,7 +38,6 @@ type VaultConfig struct {
 // LocalConfig holds the configuration for local key storage
 type LocalConfig struct {
 	KeyPath         string
-	KeyPassword     string
 	AccessDuration  time.Duration
 	RefreshDuration time.Duration
 }

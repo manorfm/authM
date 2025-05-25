@@ -92,13 +92,7 @@ func TestAuthService_Register(t *testing.T) {
 			VaultToken:         "test-token",
 			VaultMountPath:     "transit",
 			VaultKeyName:       "test-key",
-			VaultRoleName:      "test-role",
-			VaultAuthMethod:    "token",
-			VaultRetryCount:    3,
-			VaultRetryDelay:    time.Second,
-			VaultTimeout:       time.Second * 5,
 			ServerPort:         8080,
-			ServerHost:         "localhost",
 		}
 		strategy := jwt.NewCompositeStrategy(cfg, logger)
 		jwtService := jwt.NewJWTService(strategy, logger)
@@ -134,13 +128,7 @@ func TestAuthService_Register(t *testing.T) {
 			VaultToken:         "test-token",
 			VaultMountPath:     "transit",
 			VaultKeyName:       "test-key",
-			VaultRoleName:      "test-role",
-			VaultAuthMethod:    "token",
-			VaultRetryCount:    3,
-			VaultRetryDelay:    time.Second,
-			VaultTimeout:       time.Second * 5,
 			ServerPort:         8080,
-			ServerHost:         "localhost",
 		}
 		strategy := jwt.NewCompositeStrategy(cfg, logger)
 		jwtService := jwt.NewJWTService(strategy, logger)
@@ -169,13 +157,7 @@ func TestAuthService_Register(t *testing.T) {
 			VaultToken:         "test-token",
 			VaultMountPath:     "transit",
 			VaultKeyName:       "test-key",
-			VaultRoleName:      "test-role",
-			VaultAuthMethod:    "token",
-			VaultRetryCount:    3,
-			VaultRetryDelay:    time.Second,
-			VaultTimeout:       time.Second * 5,
 			ServerPort:         8080,
-			ServerHost:         "localhost",
 		}
 		strategy := jwt.NewCompositeStrategy(cfg, logger)
 		jwtService := jwt.NewJWTService(strategy, logger)
@@ -204,13 +186,7 @@ func TestAuthService_Register(t *testing.T) {
 			VaultToken:         "test-token",
 			VaultMountPath:     "transit",
 			VaultKeyName:       "test-key",
-			VaultRoleName:      "test-role",
-			VaultAuthMethod:    "token",
-			VaultRetryCount:    3,
-			VaultRetryDelay:    time.Second,
-			VaultTimeout:       time.Second * 5,
 			ServerPort:         8080,
-			ServerHost:         "localhost",
 		}
 		strategy := jwt.NewCompositeStrategy(cfg, logger)
 		jwtService := jwt.NewJWTService(strategy, logger)
@@ -295,13 +271,7 @@ func TestAuthService_Login(t *testing.T) {
 				VaultToken:         "test-token",
 				VaultMountPath:     "transit",
 				VaultKeyName:       "test-key",
-				VaultRoleName:      "test-role",
-				VaultAuthMethod:    "token",
-				VaultRetryCount:    3,
-				VaultRetryDelay:    time.Second,
-				VaultTimeout:       time.Second * 5,
 				ServerPort:         8080,
-				ServerHost:         "localhost",
 			}
 			strategy := jwt.NewCompositeStrategy(cfg, zap.NewNop())
 			jwtService := jwt.NewJWTService(strategy, zap.NewNop())

@@ -13,7 +13,6 @@ func TestLoadConfig(t *testing.T) {
 	os.Setenv("DB_USER", "postgres")
 	os.Setenv("DB_PASSWORD", "postgres")
 	os.Setenv("DB_NAME", "user_manager_test")
-	os.Setenv("JWT_SECRET", "test_secret")
 	os.Setenv("JWT_ACCESS_TOKEN_DURATION", "15m")
 	os.Setenv("JWT_REFRESH_TOKEN_DURATION", "24h")
 	os.Setenv("PORT", "8080")

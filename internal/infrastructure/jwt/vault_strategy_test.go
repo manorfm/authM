@@ -117,15 +117,10 @@ func TestVaultStrategy(t *testing.T) {
 	require.NoError(t, err)
 
 	config := &domain.VaultConfig{
-		Address:    vaultAddr,
-		Token:      vaultToken,
-		MountPath:  "transit",
-		KeyName:    "test-key",
-		RoleName:   "test-role",
-		AuthMethod: "token",
-		RetryCount: 3,
-		RetryDelay: time.Second,
-		Timeout:    time.Second * 5,
+		Address:   vaultAddr,
+		Token:     vaultToken,
+		MountPath: "transit",
+		KeyName:   "test-key",
 	}
 
 	t.Run("new strategy", func(t *testing.T) {
@@ -231,11 +226,6 @@ func getVaultStrategy(t *testing.T) *vaultStrategy {
 		Token:           vaultToken,
 		MountPath:       "transit",
 		KeyName:         "test-key",
-		RoleName:        "test-role",
-		AuthMethod:      "token",
-		RetryCount:      3,
-		RetryDelay:      time.Second,
-		Timeout:         time.Second * 5,
 		AccessDuration:  time.Hour,
 		RefreshDuration: 24 * time.Hour,
 	}

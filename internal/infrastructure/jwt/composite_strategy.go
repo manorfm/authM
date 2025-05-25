@@ -40,11 +40,6 @@ func NewCompositeStrategy(cfg *config.Config, logger *zap.Logger) domain.JWTStra
 		Token:           cfg.VaultToken,
 		MountPath:       cfg.VaultMountPath,
 		KeyName:         cfg.VaultKeyName,
-		RoleName:        cfg.VaultRoleName,
-		AuthMethod:      cfg.VaultAuthMethod,
-		RetryCount:      cfg.VaultRetryCount,
-		RetryDelay:      cfg.VaultRetryDelay,
-		Timeout:         cfg.VaultTimeout,
 		AccessDuration:  cfg.JWTAccessDuration,
 		RefreshDuration: cfg.JWTRefreshDuration,
 	}

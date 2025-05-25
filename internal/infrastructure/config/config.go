@@ -24,30 +24,24 @@ type Config struct {
 	JWTKeyPath         string
 
 	// Vault configuration
-	VaultAddress    string
-	VaultToken      string
-	VaultMountPath  string
-	VaultKeyName    string
-	VaultRoleName   string
-	VaultAuthMethod string
-	VaultRetryCount int
-	VaultRetryDelay time.Duration
-	VaultTimeout    time.Duration
+	VaultAddress   string
+	VaultToken     string
+	VaultMountPath string
+	VaultKeyName   string
 
 	// Server configuration
 	ServerPort int
-	ServerHost string
 }
 
 // NewConfig creates a new configuration with default values
 func NewConfig() *Config {
 	return &Config{
 		// Database defaults
-		DBHost:     "localhost",
+		DBHost:     "",
 		DBPort:     5432,
-		DBUser:     "postgres",
-		DBPassword: "postgres",
-		DBName:     "user_manager",
+		DBUser:     "",
+		DBPassword: "",
+		DBName:     "",
 
 		// JWT defaults
 		JWTAccessDuration:  domain.DefaultAccessTokenDuration,
@@ -55,19 +49,13 @@ func NewConfig() *Config {
 		JWTKeyPath:         "",
 
 		// Vault defaults
-		VaultAddress:    "http://localhost:8200",
-		VaultToken:      "",
-		VaultMountPath:  "transit",
-		VaultKeyName:    "jwt-signing-key",
-		VaultRoleName:   "jwt-signing",
-		VaultAuthMethod: "token",
-		VaultRetryCount: 3,
-		VaultRetryDelay: time.Second,
-		VaultTimeout:    time.Second * 5,
+		VaultAddress:   "http://localhost:8200",
+		VaultToken:     "",
+		VaultMountPath: "transit",
+		VaultKeyName:   "jwt-signing-key",
 
 		// Server defaults
 		ServerPort: 8080,
-		ServerHost: "localhost",
 	}
 }
 
@@ -105,19 +93,13 @@ func LoadConfig() (*Config, error) {
 		JWTKeyPath:         getEnv("JWT_KEY_PATH", ""),
 
 		// Vault defaults
-		VaultAddress:    getEnv("VAULT_ADDRESS", "http://localhost:8200"),
-		VaultToken:      getEnv("VAULT_TOKEN", ""),
-		VaultMountPath:  getEnv("VAULT_MOUNT_PATH", "transit"),
-		VaultKeyName:    getEnv("VAULT_KEY_NAME", "jwt-signing-key"),
-		VaultRoleName:   getEnv("VAULT_ROLE_NAME", "jwt-signing"),
-		VaultAuthMethod: getEnv("VAULT_AUTH_METHOD", "token"),
-		VaultRetryCount: getEnvInt("VAULT_RETRY_COUNT", 3),
-		VaultRetryDelay: time.Second * time.Duration(getEnvInt("VAULT_RETRY_DELAY", 1)),
-		VaultTimeout:    time.Second * time.Duration(getEnvInt("VAULT_TIMEOUT", 5)),
+		VaultAddress:   getEnv("VAULT_ADDRESS", "http://localhost:8200"),
+		VaultToken:     getEnv("VAULT_TOKEN", ""),
+		VaultMountPath: getEnv("VAULT_MOUNT_PATH", "transit"),
+		VaultKeyName:   getEnv("VAULT_KEY_NAME", "jwt-signing-key"),
 
 		// Server defaults
 		ServerPort: getEnvInt("PORT", 8080),
-		ServerHost: getEnv("SERVER_HOST", "localhost"),
 	}, nil
 }
 

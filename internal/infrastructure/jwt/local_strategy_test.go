@@ -59,7 +59,6 @@ func TestLocalStrategy(t *testing.T) {
 
 	config := &domain.LocalConfig{
 		KeyPath:         filepath.Join(tempDir, "test-key"),
-		KeyPassword:     "",
 		AccessDuration:  domain.DefaultAccessTokenDuration,
 		RefreshDuration: domain.DefaultRefreshTokenDuration,
 	}

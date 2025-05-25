@@ -37,7 +37,6 @@ func NewVaultStrategy(config *domain.VaultConfig, logger *zap.Logger) (domain.JW
 	// Create Vault client
 	vaultConfig := api.DefaultConfig()
 	vaultConfig.Address = config.Address
-	vaultConfig.Timeout = config.Timeout
 
 	client, err := api.NewClient(vaultConfig)
 	if err != nil {

@@ -36,11 +36,6 @@ func TestCompositeStrategyIntegration(t *testing.T) {
 		VaultToken:         "test-token",
 		VaultMountPath:     "transit",
 		VaultKeyName:       "test-key",
-		VaultRoleName:      "test-role",
-		VaultAuthMethod:    "token",
-		VaultRetryCount:    3,
-		VaultRetryDelay:    time.Second,
-		VaultTimeout:       time.Second * 5,
 	}
 
 	t.Run("new strategy", func(t *testing.T) {

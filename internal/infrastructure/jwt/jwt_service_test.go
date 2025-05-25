@@ -33,15 +33,10 @@ func getJWTServiceWithDuration(t *testing.T, accessDuration, refreshDuration tim
 		JWTRefreshDuration: refreshDuration,
 		JWTKeyPath:         filepath.Join(tempDir, "test-key"),
 		// Desabilitar Vault para testes
-		VaultAddress:    "",
-		VaultToken:      "",
-		VaultMountPath:  "",
-		VaultKeyName:    "",
-		VaultRoleName:   "",
-		VaultAuthMethod: "",
-		VaultRetryCount: 0,
-		VaultRetryDelay: 0,
-		VaultTimeout:    0,
+		VaultAddress:   "",
+		VaultToken:     "",
+		VaultMountPath: "",
+		VaultKeyName:   "",
 	}
 
 	strategy := NewCompositeStrategy(cfg, logger)

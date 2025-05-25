@@ -244,13 +244,7 @@ func getJWTService(t *testing.T) domain.JWTService {
 		VaultToken:         "test-token",
 		VaultMountPath:     "transit",
 		VaultKeyName:       "test-key",
-		VaultRoleName:      "test-role",
-		VaultAuthMethod:    "token",
-		VaultRetryCount:    3,
-		VaultRetryDelay:    time.Second,
-		VaultTimeout:       time.Second * 5,
 		ServerPort:         8080,
-		ServerHost:         "localhost",
 	}
 	strategy := jwt.NewCompositeStrategy(cfg, logger)
 	return jwt.NewJWTService(strategy, logger)
