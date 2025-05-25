@@ -57,7 +57,7 @@ func TestCompositeStrategyIntegration(t *testing.T) {
 		userID := ulid.Make()
 		claims := &domain.Claims{
 			Roles: []string{"user"},
-			RegisteredClaims: jwt.RegisteredClaims{
+			RegisteredClaims: &jwt.RegisteredClaims{
 				Subject:   userID.String(),
 				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
 				IssuedAt:  jwt.NewNumericDate(time.Now()),

@@ -4,6 +4,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"strconv"
@@ -77,56 +78,57 @@ func (v *vaultStrategy) Sign(claims *domain.Claims) (string, error) {
 		return "", domain.NewJWTError("sign token", domain.ErrInvalidClient)
 	}
 
-	// Create token
+	// Cria o token sem assinatura
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	token.Header["kid"] = v.keyID
 
-	// Get token string without signature
 	unsignedToken, err := token.SigningString()
 	if err != nil {
 		v.logger.Error("failed to get signing string", zap.Error(err))
 		return "", domain.NewJWTError("sign token", domain.ErrTokenGeneration)
 	}
 
-	// Sign with Vault
-	path := fmt.Sprintf("%s/sign/%s", v.config.MountPath, v.config.KeyName)
-	data := map[string]interface{}{
+	// Solicita assinatura ao Vault
+	signPath := fmt.Sprintf("%s/sign/%s", v.config.MountPath, v.config.KeyName)
+	payload := map[string]interface{}{
 		"input": base64.StdEncoding.EncodeToString([]byte(unsignedToken)),
 	}
 
-	secret, err := v.client.Logical().Write(path, data)
+	secret, err := v.client.Logical().Write(signPath, payload)
 	if err != nil {
 		v.logger.Error("failed to sign token with vault", zap.Error(err))
 		return "", domain.NewJWTError("sign token", domain.ErrTokenGeneration)
 	}
 
-	// Get signature from response
 	signature, ok := secret.Data["signature"].(string)
 	if !ok {
-		v.logger.Error("invalid signature from vault")
+		v.logger.Error("missing or invalid signature format from Vault")
 		return "", domain.NewJWTError("sign token", domain.ErrInvalidSignature)
 	}
 
-	// Remove any vault version prefix (e.g., "vault:v1:", "vault:v2:", etc.)
-	if strings.HasPrefix(signature, "vault:v") {
-		parts := strings.SplitN(signature, ":", 3)
-		if len(parts) == 3 {
-			signature = parts[2]
-		}
+	// Extrai versão da assinatura no formato "vault:vX:<signature>"
+	parts := strings.SplitN(signature, ":", 3)
+	if len(parts) != 3 || parts[0] != "vault" {
+		v.logger.Error("unexpected signature format", zap.String("raw_signature", signature))
+		return "", domain.NewJWTError("sign token", domain.ErrInvalidSignature)
 	}
 
-	// Base64 decode the signature
-	decodedSignature, err := base64.StdEncoding.DecodeString(signature)
+	version := parts[1]      // Ex: "v18"
+	rawSignature := parts[2] // Base64url da assinatura
+
+	// Gera token final: unsignedToken.signature
+	decodedSig, err := base64.StdEncoding.DecodeString(rawSignature)
 	if err != nil {
-		v.logger.Error("failed to decode signature", zap.Error(err))
+		v.logger.Error("failed to decode base64 signature", zap.Error(err))
 		return "", domain.NewJWTError("sign token", domain.ErrInvalidSignature)
 	}
 
-	// Base64URL encode the signature (JWT standard)
-	encodedSignature := base64.RawURLEncoding.EncodeToString(decodedSignature)
+	signatureB64URL := base64.RawURLEncoding.EncodeToString(decodedSig)
+	signedToken := fmt.Sprintf("%s.%s", unsignedToken, signatureB64URL)
 
-	// Combine token and signature
-	return fmt.Sprintf("%s.%s", unsignedToken, encodedSignature), nil
+	v.logger.Debug("JWT signed with Vault", zap.String("version", version), zap.String("token_id", claims.ID))
+
+	return signedToken, nil
 }
 
 // GetPublicKey returns the public key from Vault
@@ -249,7 +251,7 @@ func (v *vaultStrategy) RotateKey() error {
 		}
 
 		// Update key ID and rotation time
-		v.keyID = fmt.Sprintf("vault-%d", latestVersion+1)
+		v.keyID = fmt.Sprintf("vault:v%d", latestVersion+1)
 		v.lastRotation = time.Now()
 	}
 
@@ -305,9 +307,138 @@ func (v *vaultStrategy) loadCurrentKeyID() error {
 	}
 
 	// Set keyID based on latest version
-	v.keyID = fmt.Sprintf("vault-%d", latestVersion)
-	v.lastRotation = time.Now()
+	v.keyID = fmt.Sprintf("vault:v%d", latestVersion)
 
-	v.logger.Info("Loaded Vault key ID", zap.String("key_id", v.keyID))
+	// Extrai creation_time da versão mais recente
+	keyInfoRaw, ok := keys[strconv.Itoa(latestVersion)]
+	if !ok {
+		v.logger.Warn("missing latest version key info", zap.Int("version", latestVersion))
+		v.lastRotation = time.Now()
+		return nil
+	}
+
+	keyInfo, ok := keyInfoRaw.(map[string]interface{})
+	if !ok {
+		v.logger.Warn("invalid key info type", zap.Any("keyInfoRaw", keyInfoRaw))
+		v.lastRotation = time.Now()
+		return nil
+	}
+
+	creationTimeRaw, ok := keyInfo["creation_time"]
+	if !ok {
+		v.logger.Warn("missing creation_time field", zap.Any("keyInfo", keyInfo))
+		v.lastRotation = time.Now()
+		return nil
+	}
+
+	creationTimeStr, ok := creationTimeRaw.(string)
+	if !ok {
+		v.logger.Warn("creation_time field is not string", zap.Any("creation_time", creationTimeRaw))
+		v.lastRotation = time.Now()
+		return nil
+	}
+
+	creationTime, err := time.Parse(time.RFC3339, creationTimeStr)
+	if err != nil {
+		v.logger.Warn("failed to parse creation_time", zap.String("creation_time", creationTimeStr), zap.Error(err))
+		v.lastRotation = time.Now()
+		return nil
+	}
+
+	v.lastRotation = creationTime
+	v.logger.Info("Loaded Vault key ID and last rotation time", zap.String("key_id", v.keyID), zap.Time("last_rotation", v.lastRotation))
+
 	return nil
+}
+
+// Verify verifies a JWT token using Vault's transit engine
+func (v *vaultStrategy) Verify(tokenString string) (*domain.Claims, error) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+
+	if v.client == nil {
+		return nil, domain.ErrInvalidClient
+	}
+
+	parts := strings.Split(tokenString, ".")
+	if len(parts) != 3 {
+		v.logger.Error("Invalid token format")
+		return nil, domain.ErrInvalidToken
+	}
+
+	// Decodificar o header do token
+	headerBytes, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		v.logger.Error("Failed to decode JWT header", zap.Error(err))
+		return nil, domain.ErrInvalidToken
+	}
+
+	// Parse o header JSON para pegar o 'kid'
+	var header map[string]interface{}
+	if err := json.Unmarshal(headerBytes, &header); err != nil {
+		v.logger.Error("Failed to parse JWT header", zap.Error(err))
+		return nil, domain.ErrInvalidToken
+	}
+
+	// Obter o 'kid' do header
+	kid, ok := header["kid"].(string)
+	if !ok {
+		v.logger.Error("Missing 'kid' in JWT header")
+		return nil, domain.ErrInvalidToken
+	}
+
+	claims := &domain.Claims{}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		v.logger.Error("Failed to decode payload", zap.Error(err))
+		return nil, domain.ErrInvalidToken
+	}
+
+	if err := json.Unmarshal(payload, claims); err != nil {
+		v.logger.Error("Failed to parse claims", zap.Error(err))
+		return nil, domain.ErrInvalidClaims
+	}
+
+	if claims.ExpiresAt != nil && claims.ExpiresAt.Before(time.Now()) {
+		v.logger.Error("Token expired", zap.Time("expires_at", claims.ExpiresAt.Time))
+		return nil, domain.ErrTokenExpired
+	}
+
+	// Decodifica assinatura (base64url)
+	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil {
+		v.logger.Error("Failed to decode signature", zap.Error(err))
+		return nil, domain.ErrInvalidSignature
+	}
+
+	// Re-encode em base64 padrão para Vault
+	encodedSignature := base64.StdEncoding.EncodeToString(signature)
+
+	v.logger.Debug("Verifying token with Vault",
+		zap.String("token_id", claims.ID),
+		zap.String("subject", claims.Subject))
+
+	path := fmt.Sprintf("%s/verify/%s", v.config.MountPath, v.config.KeyName)
+	data := map[string]interface{}{
+		"input":     base64.StdEncoding.EncodeToString([]byte(parts[0] + "." + parts[1])),
+		"signature": kid + ":" + encodedSignature,
+	}
+
+	secret, err := v.client.Logical().Write(path, data)
+	if err != nil {
+		v.logger.Error("Failed to verify token with vault", zap.Error(err))
+		return nil, domain.ErrInvalidSignature
+	}
+
+	valid, ok := secret.Data["valid"].(bool)
+	if !ok || !valid {
+		v.logger.Error("Invalid token signature")
+		return nil, domain.ErrInvalidSignature
+	}
+
+	v.logger.Debug("Token verified successfully",
+		zap.String("token_id", claims.ID),
+		zap.String("subject", claims.Subject))
+
+	return claims, nil
 }

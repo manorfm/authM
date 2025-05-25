@@ -7,6 +7,8 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -196,4 +198,52 @@ func (l *localStrategy) GetRefreshDuration() time.Duration {
 		return l.config.RefreshDuration
 	}
 	return domain.DefaultRefreshTokenDuration
+}
+
+// Verify verifies a JWT token using the local private key
+func (l *localStrategy) Verify(tokenString string) (*domain.Claims, error) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
+	if l.privateKey == nil {
+		return nil, domain.ErrInvalidKeyConfig
+	}
+
+	// Parse and validate token
+	token, err := jwt.ParseWithClaims(tokenString, &domain.Claims{}, func(token *jwt.Token) (interface{}, error) {
+		// Validate signing method
+		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
+			return nil, domain.ErrInvalidSigningMethod
+		}
+		return &l.privateKey.PublicKey, nil
+	})
+
+	if err != nil {
+		l.logger.Error("Failed to parse token", zap.Error(err))
+		if errors.Is(err, jwt.ErrTokenExpired) {
+			return nil, domain.ErrTokenExpired
+		}
+		if errors.Is(err, jwt.ErrTokenMalformed) {
+			return nil, fmt.Errorf("invalid token: %w", err)
+		}
+		if errors.Is(err, jwt.ErrTokenSignatureInvalid) {
+			return nil, fmt.Errorf("invalid token: %w", err)
+		}
+		return nil, fmt.Errorf("invalid token: %w", err)
+	}
+
+	// Check if token is valid
+	if !token.Valid {
+		l.logger.Error("Invalid token")
+		return nil, fmt.Errorf("invalid token: token validation failed")
+	}
+
+	// Get claims
+	claims, ok := token.Claims.(*domain.Claims)
+	if !ok {
+		l.logger.Error("Invalid claims type")
+		return nil, domain.ErrInvalidClaims
+	}
+
+	return claims, nil
 }

@@ -129,8 +129,8 @@ type TokenPair struct {
 }
 
 type Claims struct {
+	*jwt.RegisteredClaims
 	Roles []string `json:"roles"`
-	jwt.RegisteredClaims
 }
 
 // Valid implements the jwt.Claims interface

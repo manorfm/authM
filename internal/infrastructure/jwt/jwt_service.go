@@ -23,6 +23,7 @@ type jwtService struct {
 	mu        sync.RWMutex
 	cache     *jwksCache
 	blacklist map[string]time.Time // tokenID -> expiration
+	stopChan  chan struct{}        // Channel to stop cleanup goroutine
 }
 
 type jwksCache struct {
@@ -39,121 +40,65 @@ func newJWKSCache() *jwksCache {
 }
 
 func NewJWTService(strategy domain.JWTStrategy, logger *zap.Logger) domain.JWTService {
-	/*
-		// Create JWT configuration
-		jwtConfig := &domain.JWTConfig{
-			AccessDuration:  cfg.JWTAccessDuration,
-			RefreshDuration: cfg.JWTRefreshDuration,
-		}
-
-		// Validate JWT configuration
-		if err := jwtConfig.Validate(); err != nil {
-			logger.Fatal("Invalid JWT configuration", zap.Error(err))
-		}
-
-		// Create Vault strategy
-		vaultConfig := &domain.VaultConfig{
-			Address:         cfg.VaultAddress,
-			Token:           cfg.VaultToken,
-			MountPath:       cfg.VaultMountPath,
-			KeyName:         cfg.VaultKeyName,
-			RoleName:        cfg.VaultRoleName,
-			AuthMethod:      cfg.VaultAuthMethod,
-			RetryCount:      cfg.VaultRetryCount,
-			RetryDelay:      cfg.VaultRetryDelay,
-			Timeout:         cfg.VaultTimeout,
-			AccessDuration:  cfg.JWTAccessDuration,
-			RefreshDuration: cfg.JWTRefreshDuration,
-		}
-
-		vaultStrategy, err := NewVaultStrategy(vaultConfig, logger)
-		if err != nil {
-			logger.Warn("Failed to create Vault strategy, falling back to local strategy",
-				zap.Error(err))
-		}
-
-		// Create local strategy
-		localConfig := &domain.LocalConfig{
-			KeyPath:         cfg.JWTKeyPath,
-			AccessDuration:  cfg.JWTAccessDuration,
-			RefreshDuration: cfg.JWTRefreshDuration,
-		}
-
-		localStrategy, err := NewLocalStrategy(localConfig, logger)
-		if err != nil {
-			logger.Fatal("Failed to create local strategy", zap.Error(err))
-		}
-
-		// Create composite strategy
-		strategy := NewCompositeStrategy(vaultStrategy, localStrategy, logger)
-	*/
-
-	return &jwtService{
+	service := &jwtService{
 		strategy:  strategy,
 		logger:    logger,
 		cache:     newJWKSCache(),
 		blacklist: make(map[string]time.Time),
+		stopChan:  make(chan struct{}),
+	}
+
+	// Start cleanup goroutine
+	go service.cleanupBlacklist()
+
+	return service
+}
+
+// cleanupBlacklist periodically removes expired tokens from the blacklist
+func (j *jwtService) cleanupBlacklist() {
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			j.mu.Lock()
+			now := time.Now()
+			for tokenID, expiresAt := range j.blacklist {
+				if now.After(expiresAt) {
+					delete(j.blacklist, tokenID)
+					j.logger.Debug("Removed expired token from blacklist", zap.String("token_id", tokenID))
+				}
+			}
+			j.mu.Unlock()
+		case <-j.stopChan:
+			return
+		}
 	}
 }
 
 // ValidateToken validates a JWT token and returns the claims
 func (j *jwtService) ValidateToken(tokenString string) (*domain.Claims, error) {
-
 	j.mu.RLock()
 	defer j.mu.RUnlock()
 
-	// Parse and validate the token
-	token, err := jwt.ParseWithClaims(tokenString, &domain.Claims{}, func(token *jwt.Token) (interface{}, error) {
-		// Verify signing method
-		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
-			j.logger.Error("Invalid signing method", zap.String("token_id", tokenString))
-			return nil, domain.ErrInvalidSigningMethod
-		}
-
-		// Get public key
-		publicKey := j.strategy.GetPublicKey()
-		if publicKey == nil {
-			j.logger.Error("Invalid public key", zap.String("token_id", tokenString))
-			return nil, domain.ErrInvalidToken
-		}
-
-		return publicKey, nil
-	})
-
+	// Use strategy to verify token
+	claims, err := j.strategy.Verify(tokenString)
 	if err != nil {
-		switch {
-		case errors.Is(err, jwt.ErrTokenExpired):
-			j.logger.Warn("Token expired (parser)",
-				zap.Error(err),
-				zap.String("error_type", fmt.Sprintf("%T", err)))
-			return nil, domain.ErrTokenExpired
-		case errors.Is(err, jwt.ErrTokenMalformed):
-			j.logger.Error("Malformed token",
-				zap.Error(err))
-			return nil, domain.ErrInvalidToken
-		default:
-			j.logger.Error("Failed to parse token (generic)",
-				zap.Error(err),
-				zap.String("error_type", fmt.Sprintf("%T", err)))
-			return nil, domain.ErrInvalidToken
-		}
-	}
-
-	claims, ok := token.Claims.(*domain.Claims)
-	if !ok {
-		j.logger.Error("Invalid token (not valid)",
-			zap.String("token_id", claims.ID))
-		return nil, domain.ErrInvalidToken
+		j.logger.Error("Failed to verify token",
+			zap.Error(err),
+			zap.String("error_type", fmt.Sprintf("%T", err)))
+		return nil, err
 	}
 
 	// Validate claims
 	if err := claims.Valid(); err != nil {
-		j.logger.Error("Invalid claims (claims.Valid)",
+		j.logger.Error("Invalid claims",
 			zap.Error(err),
 			zap.String("token_id", claims.ID),
 			zap.String("subject", claims.Subject))
 		if errors.Is(err, domain.ErrTokenExpired) {
-			j.logger.Warn("Token expired (claims.Valid)",
+			j.logger.Warn("Token expired",
 				zap.Error(err),
 				zap.String("token_id", claims.ID))
 			return nil, domain.ErrTokenExpired
@@ -173,6 +118,7 @@ func (j *jwtService) ValidateToken(tokenString string) (*domain.Claims, error) {
 		j.logger.Warn("Token is blacklisted", zap.String("token_id", claims.ID))
 		return nil, domain.ErrTokenBlacklisted
 	}
+
 	return claims, nil
 }
 
@@ -224,7 +170,7 @@ func (j *jwtService) GenerateTokenPair(userID ulid.ULID, roles []string) (*domai
 	accessTokenID := ulid.Make().String()
 	accessClaims := domain.Claims{
 		Roles: roles,
-		RegisteredClaims: jwt.RegisteredClaims{
+		RegisteredClaims: &jwt.RegisteredClaims{
 			Subject:   userID.String(),
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(j.strategy.GetAccessDuration())),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -245,7 +191,7 @@ func (j *jwtService) GenerateTokenPair(userID ulid.ULID, roles []string) (*domai
 	refreshTokenID := ulid.Make().String()
 	refreshClaims := domain.Claims{
 		Roles: roles,
-		RegisteredClaims: jwt.RegisteredClaims{
+		RegisteredClaims: &jwt.RegisteredClaims{
 			Subject:   userID.String(),
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(j.strategy.GetRefreshDuration())),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -306,24 +252,50 @@ func (j *jwtService) RotateKeys() error {
 
 // BlacklistToken adds a token to the blacklist
 func (j *jwtService) BlacklistToken(tokenID string, expiresAt time.Time) error {
+	if tokenID == "" {
+		return domain.ErrInvalidToken
+	}
+
 	j.mu.Lock()
 	defer j.mu.Unlock()
+
+	// If token is already expired, don't add to blacklist
+	if time.Now().After(expiresAt) {
+		j.logger.Debug("Token already expired, not adding to blacklist",
+			zap.String("token_id", tokenID),
+			zap.Time("expires_at", expiresAt))
+		return nil
+	}
+
 	j.blacklist[tokenID] = expiresAt
+	j.logger.Debug("Added token to blacklist",
+		zap.String("token_id", tokenID),
+		zap.Time("expires_at", expiresAt))
 	return nil
 }
 
 // IsTokenBlacklisted checks if a token is blacklisted
 func (j *jwtService) IsTokenBlacklisted(tokenID string) bool {
+	if tokenID == "" {
+		return false
+	}
+
 	j.mu.RLock()
-	defer j.mu.RUnlock()
 	exp, ok := j.blacklist[tokenID]
+	j.mu.RUnlock()
+
 	if !ok {
 		return false
 	}
+
 	if time.Now().After(exp) {
+		j.mu.Lock()
 		delete(j.blacklist, tokenID)
+		j.logger.Debug("Removed expired token from blacklist (during check)", zap.String("token_id", tokenID))
+		j.mu.Unlock()
 		return false
 	}
+
 	return true
 }
 
@@ -361,4 +333,9 @@ func convertToJWK(publicKey *rsa.PublicKey, kid string) (map[string]interface{},
 		"n":   nStr,
 		"e":   eStr,
 	}, nil
+}
+
+// Close stops the cleanup goroutine
+func (j *jwtService) Close() {
+	close(j.stopChan)
 }

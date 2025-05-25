@@ -138,7 +138,7 @@ type mockJWTRefresh struct{}
 
 func (m *mockJWTRefresh) ValidateToken(token string) (*domain.Claims, error) {
 	return &domain.Claims{
-		RegisteredClaims: jwtv5.RegisteredClaims{
+		RegisteredClaims: &jwtv5.RegisteredClaims{
 			Subject: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
 		},
 		Roles: []string{"user"},
@@ -222,7 +222,7 @@ type mockJWTInvalidUserID struct{}
 
 func (m *mockJWTInvalidUserID) ValidateToken(token string) (*domain.Claims, error) {
 	return &domain.Claims{
-		RegisteredClaims: jwtv5.RegisteredClaims{
+		RegisteredClaims: &jwtv5.RegisteredClaims{
 			Subject: "invalid",
 		},
 		Roles: []string{"user"},
@@ -262,7 +262,7 @@ type mockJWTTokenGenError struct{}
 
 func (m *mockJWTTokenGenError) ValidateToken(token string) (*domain.Claims, error) {
 	return &domain.Claims{
-		RegisteredClaims: jwtv5.RegisteredClaims{
+		RegisteredClaims: &jwtv5.RegisteredClaims{
 			Subject: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
 		},
 		Roles: []string{"user"},
