@@ -84,7 +84,7 @@ func (c *compositeStrategy) Sign(claims *domain.Claims) (string, error) {
 	if useVault {
 		token, err := c.vaultStrategy.Sign(claims)
 		if err == nil {
-			c.logger.Info("Signed token with Vault", zap.String("token", token))
+			c.logger.Debug("Signed token with Vault", zap.String("token", token))
 			return token, nil
 		}
 		c.logger.Warn("Failed to sign token with Vault, falling back to local strategy",

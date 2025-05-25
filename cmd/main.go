@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 	"time"
 
@@ -25,62 +24,60 @@ import (
 // @in header
 // @name Authorization
 func main() {
-	// Load configuration
 	cfg, err := config.LoadConfig()
 	if err != nil {
-		fmt.Printf("Failed to load config: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Initialize logger
 	logger, err := zap.NewProduction()
 	if err != nil {
-		fmt.Printf("Failed to initialize logger: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
 		os.Exit(1)
 	}
 	defer logger.Sync()
 
-	// Create database connection
 	ctx := context.Background()
+
 	db, err := database.NewPostgres(ctx, cfg, logger)
 	if err != nil {
 		logger.Fatal("Failed to connect to database", zap.Error(err))
 	}
 	defer db.Close()
 
-	// Create router
 	router := httprouter.NewRouter(db, cfg, logger)
 
-	// Start server
-	server := &http.Server{
-		Addr:         fmt.Sprintf(":%s", strconv.Itoa(cfg.ServerPort)),
+	srv := &http.Server{
+		Addr:         fmt.Sprintf(":%d", cfg.ServerPort),
 		Handler:      router,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  120 * time.Second,
 	}
 
-	// Start server in a goroutine
 	go func() {
-		logger.Info("Starting server", zap.String("port", strconv.Itoa(cfg.ServerPort)))
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Fatal("Server failed to start", zap.Error(err))
+		logger.Info("Server is starting", zap.Int("port", cfg.ServerPort))
+		if err := srv.ListenAndServe(); err != nil {
+			if err == http.ErrServerClosed {
+				logger.Info("Server closed gracefully")
+			} else {
+				logger.Fatal("Server failed to start", zap.Error(err))
+			}
 		}
 	}()
 
-	// Wait for interrupt signal
+	// Graceful shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	// Graceful shutdown
 	logger.Info("Shutting down server...")
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	if err := server.Shutdown(ctx); err != nil {
-		logger.Fatal("Server forced to shutdown", zap.Error(err))
+	if err := srv.Shutdown(ctx); err != nil {
+		logger.Fatal("Forced server shutdown", zap.Error(err))
 	}
 
-	logger.Info("Server exited properly")
+	logger.Info("Server exited cleanly")
 }
