@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -60,7 +59,7 @@ func NewVaultStrategy(config *domain.VaultConfig, logger *zap.Logger) (domain.JW
 		return nil, domain.ErrInvalidKeyConfig
 	}
 
-	// // Initialize key ID
+	// Initialize key ID
 	// if err := strategy.RotateKey(); err != nil {
 	// 	return nil, domain.ErrInvalidKeyConfig
 	// }
@@ -90,7 +89,11 @@ func (v *vaultStrategy) Sign(claims *domain.Claims) (string, error) {
 	// Solicita assinatura ao Vault
 	signPath := fmt.Sprintf("%s/sign/%s", v.config.MountPath, v.config.KeyName)
 	payload := map[string]interface{}{
-		"input": base64.StdEncoding.EncodeToString([]byte(unsignedToken)),
+		"input":                base64.StdEncoding.EncodeToString([]byte(unsignedToken)),
+		"algorithm":            "sha2-256",
+		"prehashed":            false,
+		"marshaling_algorithm": "asn1",
+		"signature_algorithm":  "pkcs1v15",
 	}
 
 	secret, err := v.client.Logical().Write(signPath, payload)
@@ -115,17 +118,23 @@ func (v *vaultStrategy) Sign(claims *domain.Claims) (string, error) {
 	version := parts[1]      // Ex: "v18"
 	rawSignature := parts[2] // Base64url da assinatura
 
-	// Gera token final: unsignedToken.signature
+	// Decodifica a assinatura do Vault
 	decodedSig, err := base64.StdEncoding.DecodeString(rawSignature)
 	if err != nil {
 		v.logger.Error("failed to decode base64 signature", zap.Error(err))
 		return "", domain.NewJWTError("sign token", domain.ErrInvalidSignature)
 	}
 
+	// Converte para base64url sem padding
 	signatureB64URL := base64.RawURLEncoding.EncodeToString(decodedSig)
+
+	// Gera token final: unsignedToken.signature
 	signedToken := fmt.Sprintf("%s.%s", unsignedToken, signatureB64URL)
 
-	v.logger.Debug("JWT signed with Vault", zap.String("version", version), zap.String("token_id", claims.ID))
+	v.logger.Debug("JWT signed with Vault",
+		zap.String("version", version),
+		zap.String("token_id", claims.ID),
+		zap.String("signed_token", signedToken))
 
 	return signedToken, nil
 }
@@ -155,17 +164,14 @@ func (v *vaultStrategy) GetPublicKey() *rsa.PublicKey {
 		return nil
 	}
 
-	// Get the latest version
-	var latestVersion int
-	for versionStr := range keyData {
-		version, err := strconv.Atoi(versionStr)
-		if err == nil && version > latestVersion {
-			latestVersion = version
-		}
+	latestVersion, ok := secret.Data["latest_version"].(json.Number)
+	if !ok {
+		v.logger.Error("invalid key data from vault", zap.Any("data", secret.Data))
+		return nil
 	}
 
-	// Get key info for the latest version
-	keyInfo, ok := keyData[strconv.Itoa(latestVersion)].(map[string]interface{})
+	versionStr := latestVersion.String()
+	keyInfo, ok := keyData[versionStr].(map[string]interface{})
 	if !ok {
 		v.logger.Error("invalid key info from vault", zap.Any("key_data", keyData))
 		return nil
@@ -173,7 +179,7 @@ func (v *vaultStrategy) GetPublicKey() *rsa.PublicKey {
 
 	publicKeyPEM, ok := keyInfo["public_key"].(string)
 	if !ok {
-		v.logger.Error("invalid public key from vault", zap.Any("key_info", keyInfo))
+		v.logger.Error("invalid public key from vault", zap.String("key_name", v.config.KeyName), zap.Any("key_info", keyInfo))
 		return nil
 	}
 
@@ -223,20 +229,16 @@ func (v *vaultStrategy) RotateKey() error {
 		return domain.NewJWTError("rotate key", domain.ErrInvalidKeyConfig)
 	}
 
-	// Get latest version
-	keys, ok := secret.Data["keys"].(map[string]interface{})
+	latestVersion, ok := secret.Data["latest_version"].(json.Number)
 	if !ok {
-		v.logger.Error("invalid key data from vault")
-		return domain.NewJWTError("rotate key", domain.ErrInvalidKeyConfig)
+		v.logger.Error("invalid key data from vault", zap.Any("data", secret.Data))
+		return nil
 	}
 
-	// Find the latest version
-	var latestVersion int
-	for versionStr := range keys {
-		version, err := strconv.Atoi(versionStr)
-		if err == nil && version > latestVersion {
-			latestVersion = version
-		}
+	version, err := latestVersion.Int64()
+	if err != nil {
+		v.logger.Error("failed to convert latest version to int", zap.Error(err))
+		return nil
 	}
 
 	// Only rotate if we don't have a key ID or if it's been more than 24 hours
@@ -250,7 +252,7 @@ func (v *vaultStrategy) RotateKey() error {
 		}
 
 		// Update key ID and rotation time
-		v.keyID = fmt.Sprintf("vault:v%d", latestVersion+1)
+		v.keyID = fmt.Sprintf("vault:v%d", version+1)
 		v.lastRotation = time.Now()
 	}
 
@@ -291,27 +293,21 @@ func (v *vaultStrategy) loadCurrentKeyID() error {
 		return err
 	}
 
-	keys, ok := secret.Data["keys"].(map[string]interface{})
+	latestVersion, ok := secret.Data["latest_version"].(json.Number)
 	if !ok {
-		v.logger.Error("unexpected Vault key metadata format", zap.Any("data", secret.Data))
-		return domain.ErrInvalidKeyConfig
+		v.logger.Error("invalid key data from vault", zap.Any("data", secret.Data))
+		return nil
 	}
 
-	var latestVersion int
-	for versionStr := range keys {
-		version, err := strconv.Atoi(versionStr)
-		if err == nil && version > latestVersion {
-			latestVersion = version
-		}
-	}
+	version := latestVersion.String()
 
 	// Set keyID based on latest version
-	v.keyID = fmt.Sprintf("vault:v%d", latestVersion)
+	v.keyID = fmt.Sprintf("vault:v%s", version)
 
 	// Extrai creation_time da versão mais recente
-	keyInfoRaw, ok := keys[strconv.Itoa(latestVersion)]
+	keyInfoRaw, ok := secret.Data["keys"].(map[string]interface{})[version]
 	if !ok {
-		v.logger.Warn("missing latest version key info", zap.Int("version", latestVersion))
+		v.logger.Warn("missing latest version key info", zap.String("version", version))
 		v.lastRotation = time.Now()
 		return nil
 	}
@@ -415,12 +411,17 @@ func (v *vaultStrategy) Verify(tokenString string) (*domain.Claims, error) {
 
 	v.logger.Debug("Verifying token with Vault",
 		zap.String("token_id", claims.ID),
-		zap.String("subject", claims.Subject))
+		zap.String("subject", claims.Subject),
+		zap.String("kid", kid))
 
 	path := fmt.Sprintf("%s/verify/%s", v.config.MountPath, v.config.KeyName)
 	data := map[string]interface{}{
-		"input":     base64.StdEncoding.EncodeToString([]byte(parts[0] + "." + parts[1])),
-		"signature": kid + ":" + encodedSignature,
+		"input":                base64.StdEncoding.EncodeToString([]byte(parts[0] + "." + parts[1])),
+		"signature":            kid + ":" + encodedSignature,
+		"algorithm":            "sha2-256",
+		"prehashed":            false,
+		"marshaling_algorithm": "asn1",
+		"signature_algorithm":  "pkcs1v15",
 	}
 
 	secret, err := v.client.Logical().Write(path, data)

@@ -83,9 +83,9 @@ func LoadConfig() (*Config, error) {
 		// Database defaults
 		DBHost:     getEnv("DB_HOST", "localhost"),
 		DBPort:     dbPort,
-		DBUser:     getEnv("DB_USER", "postgres"),
-		DBPassword: getEnv("DB_PASSWORD", "postgres"),
-		DBName:     getEnv("DB_NAME", "user_manager"),
+		DBUser:     getEnv("DB_USER", "owner"),
+		DBPassword: getEnv("DB_PASSWORD", "ownerTest"),
+		DBName:     getEnv("DB_NAME", "users"),
 
 		// JWT defaults
 		JWTAccessDuration:  accessDuration,

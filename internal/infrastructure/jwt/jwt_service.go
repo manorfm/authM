@@ -1,11 +1,9 @@
 package jwt
 
 import (
-	"bytes"
 	"context"
 	"crypto/rsa"
 	"encoding/base64"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"sync"
@@ -316,23 +314,25 @@ func convertToJWK(publicKey *rsa.PublicKey, kid string) (map[string]interface{},
 		return nil, domain.ErrInvalidKeyConfig
 	}
 
-	// Convert modulus and exponent to Base64URL without padding
+	// Convert modulus to base64url without padding
 	modulusBytes := publicKey.N.Bytes()
 	nStr := base64.RawURLEncoding.EncodeToString(modulusBytes)
 
-	eBytes := make([]byte, 4)
-	binary.BigEndian.PutUint32(eBytes, uint32(publicKey.E))
-	eBytes = bytes.TrimLeft(eBytes, "\x00")
+	// Convert exponent to base64url without padding
+	// RSA public exponent is typically 65537 (0x10001)
+	eBytes := []byte{0x01, 0x00, 0x01} // 65537 in big-endian
 	eStr := base64.RawURLEncoding.EncodeToString(eBytes)
 
-	return map[string]interface{}{
+	jwk := map[string]interface{}{
 		"kty": "RSA",
 		"use": "sig",
 		"kid": kid,
 		"alg": "RS256",
 		"n":   nStr,
 		"e":   eStr,
-	}, nil
+	}
+
+	return jwk, nil
 }
 
 // Close stops the cleanup goroutine
