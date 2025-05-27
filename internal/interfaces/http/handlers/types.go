@@ -10,12 +10,3 @@ type TokenRequest struct {
 	RedirectURI  string `json:"redirect_uri"`
 	CodeVerifier string `json:"code_verifier"`
 }
-
-// TokenResponse represents the token response structure
-type TokenResponse struct {
-	AccessToken  string `json:"access_token"`
-	TokenType    string `json:"token_type"`
-	ExpiresIn    int    `json:"expires_in"`
-	RefreshToken string `json:"refresh_token"`
-	IDToken      string `json:"id_token"`
-}

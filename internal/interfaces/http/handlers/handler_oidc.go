@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 
+	"github.com/go-playground/validator/v10"
 	"github.com/ipede/user-manager-service/internal/domain"
 	httperrors "github.com/ipede/user-manager-service/internal/interfaces/http/errors"
 	"go.uber.org/zap"
@@ -121,6 +122,12 @@ func (h *OIDCHandler) TokenHandler(w http.ResponseWriter, r *http.Request) {
 		zap.String("redirect_uri", req.RedirectURI))
 
 	// Validate client credentials
+	var validate = validator.New()
+	if err := validate.Struct(req); err != nil {
+		createErrorMessage(w, err)
+		return
+	}
+
 	if req.ClientID == "" || req.ClientSecret == "" {
 		h.logger.Error("Missing client credentials",
 			zap.String("client_id", req.ClientID))

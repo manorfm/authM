@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/ipede/user-manager-service/internal/application"
+	"github.com/ipede/user-manager-service/internal/domain"
 	"github.com/ipede/user-manager-service/internal/interfaces/http/dto"
 	"github.com/ipede/user-manager-service/internal/interfaces/http/errors"
 	"github.com/oklog/ulid/v2"
@@ -54,28 +55,25 @@ func (h *HandlerUser) GetUserHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *HandlerUser) ListUsersHandler(w http.ResponseWriter, r *http.Request) {
-	limit := 10
-	limitStr := r.URL.Query().Get("limit")
+func getQueryParam(r *http.Request, key string, defaultValue int) (int, error) {
+	value := r.URL.Query().Get(key)
+	if value == "" {
+		return defaultValue, nil
+	}
+	return strconv.Atoi(value)
+}
 
-	if limitStr != "" {
-		var err error
-		limit, err = strconv.Atoi(limitStr)
-		if err != nil {
-			errors.RespondWithError(w, errors.ErrCodeValidation, "invalid limit", nil, http.StatusBadRequest)
-			return
-		}
+func (h *HandlerUser) ListUsersHandler(w http.ResponseWriter, r *http.Request) {
+	limit, err := getQueryParam(r, "limit", 10)
+	if err != nil {
+		errors.RespondWithError(w, errors.ErrCodeValidation, "invalid limit", nil, http.StatusBadRequest)
+		return
 	}
 
-	offset := 0
-	offsetStr := r.URL.Query().Get("offset")
-	if offsetStr != "" {
-		var err error
-		offset, err = strconv.Atoi(offsetStr)
-		if err != nil {
-			errors.RespondWithError(w, errors.ErrCodeValidation, "invalid offset", nil, http.StatusBadRequest)
-			return
-		}
+	offset, err := getQueryParam(r, "offset", 0)
+	if err != nil {
+		errors.RespondWithError(w, errors.ErrCodeValidation, "invalid offset", nil, http.StatusBadRequest)
+		return
 	}
 
 	users, err := h.userService.ListUsers(r.Context(), limit, offset)
@@ -111,18 +109,14 @@ func (h *HandlerUser) UpdateUserHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	var req struct {
-		Name  string `json:"name"`
-		Email string `json:"email"`
-		Phone string `json:"phone"`
-	}
+	var req domain.UpdateUserRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		errors.RespondWithError(w, errors.ErrCodeInvalidRequest, "invalid request body", nil, http.StatusBadRequest)
 		return
 	}
 
-	if err := h.userService.UpdateUser(r.Context(), id, req.Name, req.Email); err != nil {
+	if err := h.userService.UpdateUser(r.Context(), id, req.Name, req.Phone); err != nil {
 		h.logger.Error("failed to update user", zap.Error(err))
 		errors.RespondWithError(w, errors.ErrCodeInternal, "failed to update user", nil, http.StatusInternalServerError)
 		return

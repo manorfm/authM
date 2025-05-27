@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-playground/validator/v10"
 	"github.com/ipede/user-manager-service/internal/domain"
 	httperrors "github.com/ipede/user-manager-service/internal/interfaces/http/errors"
 	"go.uber.org/zap"
@@ -44,12 +45,11 @@ func (h *OAuth2Handler) CreateClientHandler(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Validate request
-	if err := validateOAuth2ClientRequest(req); err != nil {
-		h.logger.Error("Invalid request", zap.Any("validation_errors", err))
-		httperrors.RespondWithError(w, httperrors.ErrCodeValidation, "Validation failed", err.ToErrorDetails(), http.StatusBadRequest)
+	var validate = validator.New()
+	if err := validate.Struct(req); err != nil {
+		createErrorMessage(w, err)
 		return
 	}
-
 	// Check if client already exists
 	existingClient, err := h.oauthRepo.FindClientByID(r.Context(), req.ID)
 	if err == nil && existingClient != nil {
@@ -101,9 +101,9 @@ func (h *OAuth2Handler) UpdateClientHandler(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Validate request
-	if err := validateOAuth2ClientRequest(req); err != nil {
-		h.logger.Error("Invalid request", zap.Any("validation_errors", err))
-		httperrors.RespondWithError(w, httperrors.ErrCodeValidation, "Validation failed", err.ToErrorDetails(), http.StatusBadRequest)
+	var validate = validator.New()
+	if err := validate.Struct(req); err != nil {
+		createErrorMessage(w, err)
 		return
 	}
 
@@ -207,30 +207,4 @@ func (h *OAuth2Handler) GetClientHandler(w http.ResponseWriter, r *http.Request)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(client)
-}
-
-// validateOAuth2ClientRequest validates the OAuth2 client request
-func validateOAuth2ClientRequest(req OAuth2ClientRequest) *httperrors.ValidationErrors {
-	var errors httperrors.ValidationErrors
-
-	if req.ID == "" {
-		errors.Add("id", "Client ID is required")
-	}
-	if req.Secret == "" {
-		errors.Add("secret", "Client secret is required")
-	}
-	if len(req.RedirectURIs) == 0 {
-		errors.Add("redirect_uris", "At least one redirect URI is required")
-	}
-	if len(req.GrantTypes) == 0 {
-		errors.Add("grant_types", "At least one grant type is required")
-	}
-	if len(req.Scopes) == 0 {
-		errors.Add("scopes", "At least one scope is required")
-	}
-
-	if errors.HasErrors() {
-		return &errors
-	}
-	return nil
 }

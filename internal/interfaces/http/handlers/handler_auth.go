@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/go-playground/validator/v10"
 	"github.com/ipede/user-manager-service/internal/domain"
 	"github.com/ipede/user-manager-service/internal/interfaces/http/errors"
 	"go.uber.org/zap"
@@ -22,34 +23,17 @@ func NewAuthHandler(authService domain.AuthService, logger *zap.Logger) *Handler
 }
 
 func (h *HandlerAuth) RegisterHandler(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
-		Name     string `json:"name"`
-		Phone    string `json:"phone"`
-	}
+	var req domain.CreateUserRequest
 
+	defer r.Body.Close()
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		errors.RespondWithError(w, errors.ErrCodeInvalidRequest, "Invalid request body", nil, http.StatusBadRequest)
 		return
 	}
 
-	var validationErrors errors.ValidationErrors
-	if req.Email == "" {
-		validationErrors.Add("email", "Email is required")
-	}
-	if req.Password == "" {
-		validationErrors.Add("password", "Password is required")
-	}
-	if req.Name == "" {
-		validationErrors.Add("name", "Name is required")
-	}
-	if req.Phone == "" {
-		validationErrors.Add("phone", "Phone is required")
-	}
-
-	if validationErrors.HasErrors() {
-		errors.RespondWithError(w, errors.ErrCodeValidation, "Validation error", validationErrors.ToErrorDetails(), http.StatusBadRequest)
+	var validate = validator.New()
+	if err := validate.Struct(req); err != nil {
+		createErrorMessage(w, err)
 		return
 	}
 
@@ -74,26 +58,17 @@ func (h *HandlerAuth) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *HandlerAuth) LoginHandler(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
-	}
+	var req domain.LoginRequest
 
+	defer r.Body.Close()
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		errors.RespondWithError(w, errors.ErrCodeInvalidRequest, "Invalid request body", nil, http.StatusBadRequest)
 		return
 	}
 
-	var validationErrors errors.ValidationErrors
-	if req.Email == "" {
-		validationErrors.Add("email", "email is required")
-	}
-	if req.Password == "" {
-		validationErrors.Add("password", "password is required")
-	}
-
-	if validationErrors.HasErrors() {
-		errors.RespondWithError(w, errors.ErrCodeValidation, "Validation failed", validationErrors.ToErrorDetails(), http.StatusBadRequest)
+	var validate = validator.New()
+	if err := validate.Struct(req); err != nil {
+		createErrorMessage(w, err)
 		return
 	}
 
@@ -117,5 +92,30 @@ func (h *HandlerAuth) LoginHandler(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("failed to encode response", zap.Error(err))
 		errors.RespondWithError(w, errors.ErrCodeInternal, "Failed to encode response", nil, http.StatusInternalServerError)
 		return
+	}
+}
+
+func createErrorMessage(w http.ResponseWriter, err error) {
+	var details []errors.ErrorDetail
+	for _, fe := range err.(validator.ValidationErrors) {
+		details = append(details, errors.ErrorDetail{
+			Field:   fe.Field(),
+			Message: validationMessage(fe),
+		})
+	}
+
+	errors.RespondWithError(w, errors.ErrCodeValidation, "Validation error", details, http.StatusBadRequest)
+}
+
+func validationMessage(fe validator.FieldError) string {
+	switch fe.Tag() {
+	case "required":
+		return fe.Field() + " is required"
+	case "email":
+		return "Invalid email format"
+	case "min":
+		return fe.Field() + " must be at least " + fe.Param() + " long"
+	default:
+		return fe.Field() + " is invalid"
 	}
 }
