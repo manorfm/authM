@@ -197,8 +197,11 @@ func TestAuthService_Register(t *testing.T) {
 
 		user, err := service.Register(ctx, "Test User", "test@example.com", "password123", "1234567890")
 		assert.Error(t, err)
+		assert.IsType(t, &domain.InfraError{}, err)
+		infraErr := err.(*domain.InfraError)
+		assert.Equal(t, "U0011", infraErr.Code)
+		assert.Equal(t, "Internal server error", infraErr.Message)
 		assert.Nil(t, user)
-		assert.Equal(t, assert.AnError, err)
 	})
 }
 
@@ -218,7 +221,7 @@ func TestAuthService_Login(t *testing.T) {
 			},
 			email:         "nonexistent@example.com",
 			password:      "password123",
-			expectedError: domain.ErrInvalidCredentials,
+			expectedError: domain.ErrUserNotFound,
 			expectedToken: nil,
 		},
 		{

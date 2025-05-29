@@ -27,7 +27,7 @@ func (h *HandlerAuth) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 
 	defer r.Body.Close()
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		errors.RespondWithError(w, errors.ErrCodeInvalidRequest, "Invalid request body", nil, http.StatusBadRequest)
+		errors.RespondWithErrorBusiness(w, domain.ErrInvalidRequestBody)
 		return
 	}
 
@@ -40,15 +40,7 @@ func (h *HandlerAuth) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	user, err := h.authService.Register(r.Context(), req.Name, req.Email, req.Password, req.Phone)
 	if err != nil {
 		h.logger.Error("failed to register user", zap.Error(err))
-		if err == domain.ErrInvalidCredentials {
-			errors.RespondWithError(w, errors.ErrCodeAuthentication, "Invalid credentials", nil, http.StatusBadRequest)
-			return
-		}
-		if err == domain.ErrUserAlreadyExists {
-			errors.RespondWithError(w, errors.ErrCodeConflict, "User already exists", nil, http.StatusConflict)
-			return
-		}
-		errors.RespondWithError(w, errors.ErrCodeInternal, "Failed to register user", nil, http.StatusInternalServerError)
+		errors.RespondWithErrorBusiness(w, err.(*domain.BusinessError))
 		return
 	}
 
@@ -62,28 +54,21 @@ func (h *HandlerAuth) LoginHandler(w http.ResponseWriter, r *http.Request) {
 
 	defer r.Body.Close()
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		errors.RespondWithError(w, errors.ErrCodeInvalidRequest, "Invalid request body", nil, http.StatusBadRequest)
+		errors.RespondWithErrorBusiness(w, domain.ErrInvalidRequestBody)
 		return
 	}
 
 	var validate = validator.New()
 	if err := validate.Struct(req); err != nil {
+		h.logger.Debug("validation error", zap.Error(err))
 		createErrorMessage(w, err)
 		return
 	}
 
 	tokenPair, err := h.authService.Login(r.Context(), req.Email, req.Password)
 	if err != nil {
-		h.logger.Error("failed to login user", zap.Error(err))
-		if err == domain.ErrInvalidCredentials {
-			errors.RespondWithError(w, errors.ErrCodeAuthentication, "Invalid credentials", nil, http.StatusBadRequest)
-			return
-		}
-		if err == domain.ErrUserNotFound {
-			errors.RespondWithError(w, errors.ErrCodeNotFound, "User not found", nil, http.StatusNotFound)
-			return
-		}
-		errors.RespondWithError(w, errors.ErrCodeInternal, "Failed to login user", nil, http.StatusInternalServerError)
+		h.logger.Debug("failed to login user", zap.Error(err))
+		errors.RespondWithErrorBusiness(w, err.(*domain.BusinessError))
 		return
 	}
 
@@ -103,8 +88,7 @@ func createErrorMessage(w http.ResponseWriter, err error) {
 			Message: validationMessage(fe),
 		})
 	}
-
-	errors.RespondWithError(w, errors.ErrCodeValidation, "Validation error", details, http.StatusBadRequest)
+	errors.RespondErrorBusinessWithDetails(w, domain.ErrInvalidField, details)
 }
 
 func validationMessage(fe validator.FieldError) string {

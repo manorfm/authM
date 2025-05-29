@@ -6,13 +6,15 @@ import (
 	"github.com/ipede/user-manager-service/internal/domain"
 	"github.com/ipede/user-manager-service/internal/infrastructure/database"
 	"github.com/oklog/ulid/v2"
+	"go.uber.org/zap"
 )
 
 type UserRepository struct {
-	db *database.Postgres
+	logger *zap.Logger
+	db     *database.Postgres
 }
 
-func NewUserRepository(db *database.Postgres) *UserRepository {
+func NewUserRepository(db *database.Postgres, logger *zap.Logger) *UserRepository {
 	return &UserRepository{db: db}
 }
 
@@ -30,7 +32,8 @@ func (r *UserRepository) FindByID(ctx context.Context, id ulid.ULID) (*domain.Us
 		FROM users WHERE id = $1
 	`, id.String()).Scan(&user.ID, &user.Name, &user.Email, &user.Password, &user.Phone, &user.CreatedAt, &user.UpdatedAt, &user.Roles)
 	if err != nil {
-		return nil, err
+		r.logger.Error("failed to find user by id", zap.Error(err))
+		return nil, domain.ErrDatabaseQuery
 	}
 	return user, nil
 }
@@ -42,7 +45,8 @@ func (r *UserRepository) FindByEmail(ctx context.Context, email string) (*domain
 		FROM users WHERE email = $1
 	`, email).Scan(&user.ID, &user.Name, &user.Email, &user.Password, &user.Phone, &user.CreatedAt, &user.UpdatedAt, &user.Roles)
 	if err != nil {
-		return nil, err
+		r.logger.Error("failed to find user by email", zap.Error(err))
+		return nil, domain.ErrUserNotFound
 	}
 	return user, nil
 }
@@ -51,7 +55,8 @@ func (r *UserRepository) ExistsByEmail(ctx context.Context, email string) (bool,
 	var count int
 	err := r.db.QueryRow(ctx, "SELECT COUNT(*) FROM users WHERE email = $1", email).Scan(&count)
 	if err != nil {
-		return false, err
+		r.logger.Error("failed to check if user exists", zap.Error(err))
+		return false, domain.ErrDatabaseQuery
 	}
 	return count > 0, nil
 }
@@ -76,7 +81,8 @@ func (r *UserRepository) List(ctx context.Context, limit, offset int) ([]*domain
 		LIMIT $1 OFFSET $2
 	`, limit, offset)
 	if err != nil {
-		return nil, err
+		r.logger.Error("failed to list users", zap.Error(err))
+		return nil, domain.ErrDatabaseQuery
 	}
 	defer rows.Close()
 
@@ -85,7 +91,8 @@ func (r *UserRepository) List(ctx context.Context, limit, offset int) ([]*domain
 		user := &domain.User{}
 		err := rows.Scan(&user.ID, &user.Name, &user.Email, &user.Phone, &user.CreatedAt, &user.UpdatedAt, &user.Roles)
 		if err != nil {
-			return nil, err
+			r.logger.Error("failed to scan user", zap.Error(err))
+			return nil, domain.ErrDatabaseQuery
 		}
 		users = append(users, user)
 	}

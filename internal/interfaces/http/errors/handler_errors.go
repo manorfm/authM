@@ -3,6 +3,8 @@ package errors
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/ipede/user-manager-service/internal/domain"
 )
 
 // ErrorResponse represents the standard error response structure
@@ -29,8 +31,38 @@ const (
 	ErrCodeConflict       = "ERR_001"
 )
 
+func getStatus(err *domain.BusinessError) int {
+	switch err.Code {
+	case domain.ErrUserNotFound.Code:
+		return http.StatusNotFound
+	case domain.ErrInternal.Code:
+		return http.StatusInternalServerError
+	}
+	return http.StatusBadRequest
+}
+
+// RespondWithErrorBusiness sends a standardized error response
+func RespondWithErrorBusiness(w http.ResponseWriter, err *domain.BusinessError) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(getStatus(err))
+	json.NewEncoder(w).Encode(ErrorResponse{
+		Code:    err.Code,
+		Message: err.Message,
+	})
+}
+
+func RespondErrorBusinessWithDetails(w http.ResponseWriter, err *domain.BusinessError, details []ErrorDetail) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(getStatus(err))
+	json.NewEncoder(w).Encode(ErrorResponse{
+		Code:    err.Code,
+		Message: err.Message,
+		Details: details,
+	})
+}
+
 // RespondWithError sends a standardized error response
-func RespondWithError(w http.ResponseWriter, code string, message string, details []ErrorDetail, status int) {
+func RespondWithError(w http.ResponseWriter, code, message string, details []ErrorDetail, status int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(ErrorResponse{

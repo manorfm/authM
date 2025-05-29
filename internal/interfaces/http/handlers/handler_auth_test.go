@@ -69,23 +69,6 @@ func TestAuthHandler_Register(t *testing.T) {
 			},
 		},
 		{
-			name: "invalid credentials",
-			requestBody: map[string]interface{}{
-				"name":     "John Doe",
-				"email":    "john@example.com",
-				"password": "password123",
-				"phone":    "1234567890",
-			},
-			mockSetup: func(m *mockAuthService) {
-				m.On("Register", mock.Anything, "John Doe", "john@example.com", "password123", "1234567890").Return(nil, domain.ErrInvalidCredentials)
-			},
-			expectedStatus: http.StatusBadRequest,
-			expectedBody: errors.ErrorResponse{
-				Code:    "ERR_002",
-				Message: "Invalid credentials",
-			},
-		},
-		{
 			name: "user already exists",
 			requestBody: map[string]interface{}{
 				"name":     "John Doe",
@@ -96,9 +79,9 @@ func TestAuthHandler_Register(t *testing.T) {
 			mockSetup: func(m *mockAuthService) {
 				m.On("Register", mock.Anything, "John Doe", "john@example.com", "password123", "1234567890").Return(nil, domain.ErrUserAlreadyExists)
 			},
-			expectedStatus: http.StatusConflict,
+			expectedStatus: http.StatusBadRequest,
 			expectedBody: errors.ErrorResponse{
-				Code:    "ERR_001",
+				Code:    "U0007",
 				Message: "User already exists",
 			},
 		},
@@ -114,15 +97,15 @@ func TestAuthHandler_Register(t *testing.T) {
 			},
 			expectedStatus: http.StatusBadRequest,
 			expectedBody: errors.ErrorResponse{
-				Code:    "ERR_003",
-				Message: "Validation error",
+				Code:    "U0009",
+				Message: "Invalid field",
 				Details: []errors.ErrorDetail{
 					{
-						Field:   "email",
+						Field:   "Email",
 						Message: "Email is required",
 					},
 					{
-						Field:   "password",
+						Field:   "Password",
 						Message: "Password is required",
 					},
 				},
@@ -136,7 +119,7 @@ func TestAuthHandler_Register(t *testing.T) {
 			},
 			expectedStatus: http.StatusBadRequest,
 			expectedBody: errors.ErrorResponse{
-				Code:    "ERR_003",
+				Code:    "U0010",
 				Message: "Invalid request body",
 			},
 		},
@@ -234,7 +217,7 @@ func TestAuthHandler_Login(t *testing.T) {
 			},
 			expectedStatus: http.StatusBadRequest,
 			expectedBody: errors.ErrorResponse{
-				Code:    errors.ErrCodeAuthentication,
+				Code:    "U0001",
 				Message: "Invalid credentials",
 			},
 		},
@@ -249,12 +232,12 @@ func TestAuthHandler_Login(t *testing.T) {
 			},
 			expectedStatus: http.StatusBadRequest,
 			expectedBody: errors.ErrorResponse{
-				Code:    errors.ErrCodeValidation,
-				Message: "Validation failed",
+				Code:    "U0009",
+				Message: "Invalid field",
 				Details: []errors.ErrorDetail{
 					{
-						Field:   "password",
-						Message: "password is required",
+						Field:   "Password",
+						Message: "Password is required",
 					},
 				},
 			},
@@ -267,7 +250,7 @@ func TestAuthHandler_Login(t *testing.T) {
 			},
 			expectedStatus: http.StatusBadRequest,
 			expectedBody: errors.ErrorResponse{
-				Code:    errors.ErrCodeInvalidRequest,
+				Code:    "U0010",
 				Message: "Invalid request body",
 			},
 		},

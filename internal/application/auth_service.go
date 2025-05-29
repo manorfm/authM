@@ -2,7 +2,6 @@ package application
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/ipede/user-manager-service/internal/domain"
@@ -39,7 +38,8 @@ func (s *AuthService) Register(ctx context.Context, name, email, passwordStr, ph
 	// Hash password
 	hashedPassword, err := password.HashPassword(passwordStr)
 	if err != nil {
-		return nil, err
+		s.logger.Error("failed to hash password", zap.Error(err))
+		return nil, domain.ErrInternal
 	}
 
 	// Create user
@@ -57,7 +57,8 @@ func (s *AuthService) Register(ctx context.Context, name, email, passwordStr, ph
 	// Save user to database
 	err = s.userRepo.Create(ctx, user)
 	if err != nil {
-		return nil, err
+		s.logger.Error("failed to create user", zap.Error(err))
+		return nil, domain.ErrInternal
 	}
 
 	return user, nil
@@ -66,9 +67,6 @@ func (s *AuthService) Register(ctx context.Context, name, email, passwordStr, ph
 func (s *AuthService) Login(ctx context.Context, email, passwordStr string) (*domain.TokenPair, error) {
 	user, err := s.userRepo.FindByEmail(ctx, email)
 	if err != nil {
-		if err == domain.ErrUserNotFound {
-			return nil, domain.ErrInvalidCredentials
-		}
 		return nil, err
 	}
 
@@ -79,7 +77,7 @@ func (s *AuthService) Login(ctx context.Context, email, passwordStr string) (*do
 
 	tokenPair, err := s.jwtService.GenerateTokenPair(user.ID, user.Roles)
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate token: %w", err)
+		return nil, domain.ErrFailedGenerateToken
 	}
 
 	return tokenPair, nil

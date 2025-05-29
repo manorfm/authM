@@ -31,7 +31,7 @@ func NewRouter(
 	strategy := jwt.NewCompositeStrategy(cfg, logger)
 	jwtService := jwt.NewJWTService(strategy, logger)
 	authMiddleware := auth.NewAuthMiddleware(jwtService, logger)
-	userRepo := repository.NewUserRepository(db)
+	userRepo := repository.NewUserRepository(db, logger)
 	oauthRepo := repository.NewOAuth2Repository(db, logger)
 	userService := application.NewUserService(userRepo, logger)
 	authService := application.NewAuthService(userRepo, jwtService, logger)

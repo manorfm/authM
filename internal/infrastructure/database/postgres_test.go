@@ -25,9 +25,9 @@ func TestNewPostgres(t *testing.T) {
 			cfg: &config.Config{
 				DBHost:     "localhost",
 				DBPort:     5432,
-				DBUser:     "usuario",
-				DBPassword: "senha",
-				DBName:     "usuarios",
+				DBUser:     "owner",
+				DBPassword: "ownerTest",
+				DBName:     "users",
 			},
 			wantErr: false,
 		},
@@ -94,9 +94,9 @@ func TestPostgres_Close(t *testing.T) {
 	cfg := &config.Config{
 		DBHost:     "localhost",
 		DBPort:     5432,
-		DBUser:     "usuario",
-		DBPassword: "senha",
-		DBName:     "usuarios",
+		DBUser:     "owner",
+		DBPassword: "ownerTest",
+		DBName:     "users",
 	}
 
 	db, err := NewPostgres(ctx, cfg, logger)
