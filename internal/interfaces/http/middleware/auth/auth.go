@@ -23,14 +23,14 @@ func (m *AuthMiddleware) Authenticator(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := m.extractToken(r)
 		if token == "" {
-			httperrors.RespondWithError(w, httperrors.ErrCodeAuthentication, "Unauthorized", nil, http.StatusUnauthorized)
+			httperrors.RespondWithError(w, domain.ErrUnauthorized)
 			return
 		}
 
 		claims, err := m.jwt.ValidateToken(token)
 		if err != nil {
 			m.logger.Error("Failed to validate token", zap.Error(err))
-			httperrors.RespondWithError(w, httperrors.ErrCodeAuthentication, "Invalid token", nil, http.StatusUnauthorized)
+			httperrors.RespondWithError(w, domain.ErrForbidden)
 			return
 		}
 
@@ -49,7 +49,7 @@ func (m *AuthMiddleware) RequireRole(role string) func(next http.Handler) http.H
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			roles, ok := r.Context().Value("roles").([]string)
 			if !ok {
-				httperrors.RespondWithError(w, httperrors.ErrCodeAuthorization, "Forbidden", nil, http.StatusForbidden)
+				httperrors.RespondWithError(w, domain.ErrForbidden)
 				return
 			}
 
@@ -60,7 +60,7 @@ func (m *AuthMiddleware) RequireRole(role string) func(next http.Handler) http.H
 				}
 			}
 
-			httperrors.RespondWithError(w, httperrors.ErrCodeAuthorization, "Forbidden", nil, http.StatusForbidden)
+			httperrors.RespondWithError(w, domain.ErrForbidden)
 		})
 	}
 }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/ipede/user-manager-service/internal/domain"
+	"github.com/ipede/user-manager-service/internal/infrastructure/config"
 	"github.com/oklog/ulid/v2"
 	"go.uber.org/zap"
 )
@@ -18,6 +19,7 @@ import (
 type jwtService struct {
 	strategy  domain.JWTStrategy
 	logger    *zap.Logger
+	config    *config.Config
 	mu        sync.RWMutex
 	cache     *jwksCache
 	blacklist map[string]time.Time // tokenID -> expiration
@@ -37,10 +39,11 @@ func newJWKSCache() *jwksCache {
 	}
 }
 
-func NewJWTService(strategy domain.JWTStrategy, logger *zap.Logger) domain.JWTService {
+func NewJWTService(strategy domain.JWTStrategy, config *config.Config, logger *zap.Logger) domain.JWTService {
 	service := &jwtService{
 		strategy:  strategy,
 		logger:    logger,
+		config:    config,
 		cache:     newJWKSCache(),
 		blacklist: make(map[string]time.Time),
 		stopChan:  make(chan struct{}),
@@ -126,7 +129,7 @@ func (j *jwtService) GetJWKS(ctx context.Context) (map[string]interface{}, error
 
 	// Check cache first
 	j.cache.mu.RLock()
-	if !j.cache.lastSync.IsZero() && time.Since(j.cache.lastSync) < domain.JWKSCacheDuration {
+	if !j.cache.lastSync.IsZero() && time.Since(j.cache.lastSync) < j.config.JWKSCacheDuration {
 		keys := j.cache.keys
 		j.cache.mu.RUnlock()
 		return keys, nil
@@ -137,13 +140,13 @@ func (j *jwtService) GetJWKS(ctx context.Context) (map[string]interface{}, error
 	publicKey := j.strategy.GetPublicKey()
 	if publicKey == nil {
 		j.logger.Error("Failed to get public key")
-		return nil, domain.ErrInvalidClient
+		return nil, domain.ErrInternal
 	}
 
 	jwk, err := convertToJWK(publicKey, j.strategy.GetKeyID())
 	if err != nil {
 		j.logger.Error("Failed to convert public key to JWK", zap.Error(err))
-		return nil, domain.ErrInvalidKeyConfig
+		return nil, domain.ErrInternal
 	}
 
 	keys := map[string]interface{}{
@@ -170,7 +173,7 @@ func (j *jwtService) GenerateTokenPair(userID ulid.ULID, roles []string) (*domai
 		Roles: roles,
 		RegisteredClaims: &jwt.RegisteredClaims{
 			Subject:   userID.String(),
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(j.strategy.GetAccessDuration())),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(j.config.JWTAccessDuration)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 			ID:        accessTokenID,
 		},
@@ -191,7 +194,7 @@ func (j *jwtService) GenerateTokenPair(userID ulid.ULID, roles []string) (*domai
 		Roles: roles,
 		RegisteredClaims: &jwt.RegisteredClaims{
 			Subject:   userID.String(),
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(j.strategy.GetRefreshDuration())),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(j.config.JWTRefreshDuration)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 			ID:        refreshTokenID,
 		},
@@ -310,10 +313,6 @@ func (j *jwtService) TryVault() error {
 
 // convertToJWK converts an RSA public key to JWK format
 func convertToJWK(publicKey *rsa.PublicKey, kid string) (map[string]interface{}, error) {
-	if publicKey == nil {
-		return nil, domain.ErrInvalidKeyConfig
-	}
-
 	// Convert modulus to base64url without padding
 	modulusBytes := publicKey.N.Bytes()
 	nStr := base64.RawURLEncoding.EncodeToString(modulusBytes)

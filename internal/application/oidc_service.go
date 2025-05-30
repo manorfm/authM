@@ -46,15 +46,13 @@ func (s *OIDCService) GetUserInfo(ctx context.Context, userID string) (map[strin
 		s.logger.Error("Failed to parse user ID",
 			zap.String("user_id", userID),
 			zap.Error(err))
-		return nil, err
+		return nil, domain.ErrInvalidUserID
 	}
 
 	user, err := s.userRepo.FindByID(ctx, id)
 	if err != nil {
-		s.logger.Error("Failed to find user",
-			zap.String("user_id", userID),
-			zap.Error(err))
-		return nil, err
+		s.logger.Error("Failed to find user", zap.String("user_id", userID), zap.Error(err))
+		return nil, domain.ErrUserNotFound
 	}
 
 	return map[string]interface{}{
@@ -70,7 +68,7 @@ func (s *OIDCService) GetOpenIDConfiguration(ctx context.Context) (map[string]in
 
 	if s.oauthRepo == nil {
 		s.logger.Error("OAuth2 repository is nil")
-		return nil, domain.NewJWTError("get openid configuration", domain.ErrInvalidClient)
+		return nil, domain.ErrInternal
 	}
 
 	return map[string]interface{}{
@@ -93,25 +91,34 @@ func (s *OIDCService) ExchangeCode(ctx context.Context, code string, codeVerifie
 		zap.String("code", code),
 		zap.String("code_verifier", codeVerifier))
 
+	var removeAuthorizationCode = func() {
+		// Delete used authorization code
+		if err := s.oauthRepo.DeleteAuthorizationCode(ctx, code); err != nil {
+			s.logger.Error("Failed to delete authorization code", zap.Error(err))
+		}
+	}
+
+	defer removeAuthorizationCode()
+
 	// Get authorization code from repository
 	authCode, err := s.oauthRepo.GetAuthorizationCode(ctx, code)
 	if err != nil {
 		s.logger.Error("Failed to get authorization code", zap.Error(err))
-		return nil, domain.NewJWTError("exchange code", domain.ErrInvalidAuthorizationCode)
+		return nil, domain.ErrInvalidAuthorizationCode
 	}
 
 	// Check if code is expired
 	if authCode.ExpiresAt.Before(time.Now()) {
 		s.logger.Error("Authorization code expired",
 			zap.Time("expires_at", authCode.ExpiresAt))
-		return nil, domain.NewJWTError("exchange code", domain.ErrAuthorizationCodeExpired)
+		return nil, domain.ErrAuthorizationCodeExpired
 	}
 
 	// Validate PKCE
 	if authCode.CodeChallenge != "" {
 		if codeVerifier == "" {
 			s.logger.Error("PKCE code verifier is required")
-			return nil, domain.NewJWTError("exchange code", domain.ErrInvalidPKCE)
+			return nil, domain.ErrInvalidPKCE
 		}
 
 		// Calculate code challenge from verifier
@@ -127,7 +134,7 @@ func (s *OIDCService) ExchangeCode(ctx context.Context, code string, codeVerifie
 		default:
 			s.logger.Error("Unsupported PKCE challenge method",
 				zap.String("method", authCode.CodeChallengeMethod))
-			return nil, domain.NewJWTError("exchange code", domain.ErrInvalidPKCE)
+			return nil, domain.ErrInvalidPKCE
 		}
 
 		// Compare calculated challenge with stored challenge
@@ -135,7 +142,7 @@ func (s *OIDCService) ExchangeCode(ctx context.Context, code string, codeVerifie
 			s.logger.Error("PKCE validation failed",
 				zap.String("calculated", calculatedChallenge),
 				zap.String("stored", authCode.CodeChallenge))
-			return nil, domain.NewJWTError("exchange code", domain.ErrInvalidPKCE)
+			return nil, domain.ErrInvalidPKCE
 		}
 	}
 
@@ -145,7 +152,7 @@ func (s *OIDCService) ExchangeCode(ctx context.Context, code string, codeVerifie
 		s.logger.Error("Failed to parse user ID",
 			zap.String("user_id", authCode.UserID),
 			zap.Error(err))
-		return nil, domain.NewJWTError("exchange code", domain.ErrInvalidUserID)
+		return nil, domain.ErrInvalidUserID
 	}
 
 	user, err := s.userRepo.FindByID(ctx, userID)
@@ -153,7 +160,7 @@ func (s *OIDCService) ExchangeCode(ctx context.Context, code string, codeVerifie
 		s.logger.Error("Failed to get user",
 			zap.String("user_id", authCode.UserID),
 			zap.Error(err))
-		return nil, domain.NewJWTError("exchange code", err)
+		return nil, err
 	}
 
 	// Generate token pair
@@ -161,14 +168,7 @@ func (s *OIDCService) ExchangeCode(ctx context.Context, code string, codeVerifie
 	if err != nil {
 		s.logger.Error("Failed to generate token pair",
 			zap.Error(err))
-		return nil, domain.NewJWTError("exchange code", err)
-	}
-
-	// Delete used authorization code
-	if err := s.oauthRepo.DeleteAuthorizationCode(ctx, code); err != nil {
-		s.logger.Error("Failed to delete authorization code",
-			zap.Error(err))
-		// Don't return error here, as the tokens were already generated
+		return nil, err
 	}
 
 	// Convert infrastructure token pair to domain token pair
@@ -188,13 +188,13 @@ func (s *OIDCService) RefreshToken(ctx context.Context, refreshToken string) (*d
 	if err != nil {
 		s.logger.Error("Failed to validate refresh token",
 			zap.Error(err))
-		return nil, domain.NewJWTError("refresh token", domain.ErrInvalidCredentials)
+		return nil, domain.ErrInvalidCredentials
 	}
 
 	// claims pode ser nil se o mock retornar nil, garantir isso
 	if claims == nil {
 		s.logger.Error("Claims is nil after token validation")
-		return nil, domain.NewJWTError("refresh token", domain.ErrInvalidCredentials)
+		return nil, domain.ErrInvalidCredentials
 	}
 
 	// Parse user ID
@@ -203,7 +203,7 @@ func (s *OIDCService) RefreshToken(ctx context.Context, refreshToken string) (*d
 		s.logger.Error("Failed to parse user ID",
 			zap.String("user_id", claims.Subject),
 			zap.Error(err))
-		return nil, domain.NewJWTError("refresh token", domain.ErrInvalidUserID)
+		return nil, domain.ErrInvalidUserID
 	}
 
 	// Get user from repository
@@ -212,7 +212,7 @@ func (s *OIDCService) RefreshToken(ctx context.Context, refreshToken string) (*d
 		s.logger.Error("Failed to get user",
 			zap.String("user_id", claims.Subject),
 			zap.Error(err))
-		return nil, domain.NewJWTError("refresh token", err)
+		return nil, domain.ErrUserNotFound
 	}
 
 	// Generate new token pair
@@ -220,7 +220,7 @@ func (s *OIDCService) RefreshToken(ctx context.Context, refreshToken string) (*d
 	if err != nil {
 		s.logger.Error("Failed to generate token pair",
 			zap.Error(err))
-		return nil, domain.NewJWTError("refresh token", err)
+		return nil, domain.ErrInternal
 	}
 
 	// Convert infrastructure token pair to domain token pair
@@ -243,7 +243,7 @@ func (s *OIDCService) Authorize(ctx context.Context, clientID, redirectURI, stat
 		s.logger.Error("Failed to find client",
 			zap.String("client_id", clientID),
 			zap.Error(err))
-		return "", domain.NewJWTError("authorize", domain.ErrInvalidClient)
+		return "", domain.ErrInvalidClient
 	}
 
 	// Check if redirect URI is allowed
@@ -257,7 +257,7 @@ func (s *OIDCService) Authorize(ctx context.Context, clientID, redirectURI, stat
 	if !validURI {
 		s.logger.Error("Invalid redirect URI",
 			zap.String("redirect_uri", redirectURI))
-		return "", domain.NewJWTError("authorize", domain.ErrInvalidClient)
+		return "", domain.ErrInvalidClient
 	}
 
 	// Validate scope (now supports multiple scopes)
@@ -275,7 +275,7 @@ func (s *OIDCService) Authorize(ctx context.Context, clientID, redirectURI, stat
 			if !found {
 				s.logger.Error("Invalid scope",
 					zap.String("scope", reqScope))
-				return "", domain.NewJWTError("authorize", domain.ErrInvalidScope)
+				return "", domain.ErrInvalidScope
 			}
 		}
 	}
@@ -284,7 +284,7 @@ func (s *OIDCService) Authorize(ctx context.Context, clientID, redirectURI, stat
 	userID, ok := ctx.Value("sub").(string)
 	if !ok || userID == "" {
 		s.logger.Error("Failed to get user ID from context")
-		return "", domain.NewJWTError("authorize", domain.ErrInvalidCredentials)
+		return "", domain.ErrInvalidCredentials
 	}
 
 	// Get PKCE parameters from context
@@ -295,7 +295,7 @@ func (s *OIDCService) Authorize(ctx context.Context, clientID, redirectURI, stat
 	randomBytes := make([]byte, 32)
 	if _, err := rand.Read(randomBytes); err != nil {
 		s.logger.Error("Failed to generate random bytes for authorization code", zap.Error(err))
-		return "", domain.NewJWTError("authorize", domain.ErrTokenGeneration)
+		return "", domain.ErrInternal
 	}
 
 	// Encode random bytes to base64
@@ -315,7 +315,7 @@ func (s *OIDCService) Authorize(ctx context.Context, clientID, redirectURI, stat
 	// Store authorization code
 	if err := s.oauthRepo.CreateAuthorizationCode(ctx, authCode); err != nil {
 		s.logger.Error("Failed to create authorization code", zap.Error(err))
-		return "", domain.NewJWTError("authorize", err)
+		return "", domain.ErrInternal
 	}
 
 	return code, nil

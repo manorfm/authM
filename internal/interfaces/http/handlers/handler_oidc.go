@@ -8,7 +8,7 @@ import (
 
 	"github.com/go-playground/validator/v10"
 	"github.com/ipede/user-manager-service/internal/domain"
-	httperrors "github.com/ipede/user-manager-service/internal/interfaces/http/errors"
+	"github.com/ipede/user-manager-service/internal/interfaces/http/errors"
 	"go.uber.org/zap"
 )
 
@@ -36,27 +36,27 @@ func (h *OIDCHandler) GetUserInfoHandler(w http.ResponseWriter, r *http.Request)
 		h.logger.Error("Failed to get user ID from context",
 			zap.Any("user_id", r.Context().Value("sub")),
 			zap.Bool("ok", ok))
-		httperrors.RespondWithError(w, httperrors.ErrCodeAuthentication, "User not authenticated", nil, http.StatusUnauthorized)
+		errors.RespondWithError(w, domain.ErrUnauthorized)
 		return
 	}
 
 	userInfo, err := h.oidcService.GetUserInfo(r.Context(), userID)
 	if err != nil {
 		h.logger.Error("Failed to get user info", zap.Error(err))
-		httperrors.RespondWithError(w, httperrors.ErrCodeInternal, "Failed to get user info", nil, http.StatusInternalServerError)
+		errors.RespondWithError(w, err.(domain.Error))
 		return
 	}
 
 	if userInfo == nil {
 		h.logger.Error("User info is nil")
-		httperrors.RespondWithError(w, httperrors.ErrCodeInternal, "Failed to get user info", nil, http.StatusInternalServerError)
+		errors.RespondWithError(w, domain.ErrUserNotFound)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(userInfo); err != nil {
 		h.logger.Error("Failed to encode user info response", zap.Error(err))
-		httperrors.RespondWithError(w, httperrors.ErrCodeInternal, "Failed to encode response", nil, http.StatusInternalServerError)
+		errors.RespondWithError(w, domain.ErrInternal)
 		return
 	}
 }
@@ -65,20 +65,20 @@ func (h *OIDCHandler) GetJWKSHandler(w http.ResponseWriter, r *http.Request) {
 	jwks, err := h.jwtService.GetJWKS(r.Context())
 	if err != nil {
 		h.logger.Error("Failed to get JWKS", zap.Error(err))
-		httperrors.RespondWithError(w, httperrors.ErrCodeInternal, "Failed to get JWKS", nil, http.StatusInternalServerError)
+		errors.RespondWithError(w, err.(domain.Error))
 		return
 	}
 
 	if jwks == nil {
 		h.logger.Error("JWKS is nil")
-		httperrors.RespondWithError(w, httperrors.ErrCodeInternal, "Failed to get JWKS", nil, http.StatusInternalServerError)
+		errors.RespondWithError(w, domain.ErrInternal)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(jwks); err != nil {
 		h.logger.Error("Failed to encode JWKS response", zap.Error(err))
-		httperrors.RespondWithError(w, httperrors.ErrCodeInternal, "Failed to encode response", nil, http.StatusInternalServerError)
+		errors.RespondWithError(w, domain.ErrInternal)
 		return
 	}
 }
@@ -88,13 +88,13 @@ func (h *OIDCHandler) GetOpenIDConfigurationHandler(w http.ResponseWriter, r *ht
 	if err != nil {
 		h.logger.Error("Failed to get OpenID configuration",
 			zap.Error(err))
-		httperrors.RespondWithError(w, httperrors.ErrCodeInternal, "Failed to get OpenID configuration", nil, http.StatusInternalServerError)
+		errors.RespondWithError(w, domain.ErrInternal)
 		return
 	}
 
 	if config == nil {
 		h.logger.Error("OpenID configuration is nil")
-		httperrors.RespondWithError(w, httperrors.ErrCodeInternal, "Failed to get OpenID configuration", nil, http.StatusInternalServerError)
+		errors.RespondWithError(w, domain.ErrInternal)
 		return
 	}
 
@@ -102,7 +102,7 @@ func (h *OIDCHandler) GetOpenIDConfigurationHandler(w http.ResponseWriter, r *ht
 	if err := json.NewEncoder(w).Encode(config); err != nil {
 		h.logger.Error("Failed to encode OpenID configuration response",
 			zap.Error(err))
-		httperrors.RespondWithError(w, httperrors.ErrCodeInternal, "Failed to encode OpenID configuration response", nil, http.StatusInternalServerError)
+		errors.RespondWithError(w, domain.ErrInternal)
 		return
 	}
 }
@@ -112,7 +112,14 @@ func (h *OIDCHandler) TokenHandler(w http.ResponseWriter, r *http.Request) {
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.logger.Error("Failed to decode request body", zap.Error(err))
-		httperrors.RespondWithError(w, httperrors.ErrCodeInvalidRequest, "Invalid request body", nil, http.StatusBadRequest)
+		errors.RespondWithError(w, domain.ErrInvalidRequestBody)
+		return
+	}
+
+	// Validate request body
+	var validate = validator.New()
+	if err := validate.Struct(req); err != nil {
+		createErrorMessage(w, err)
 		return
 	}
 
@@ -121,20 +128,6 @@ func (h *OIDCHandler) TokenHandler(w http.ResponseWriter, r *http.Request) {
 		zap.String("client_id", req.ClientID),
 		zap.String("redirect_uri", req.RedirectURI))
 
-	// Validate client credentials
-	var validate = validator.New()
-	if err := validate.Struct(req); err != nil {
-		createErrorMessage(w, err)
-		return
-	}
-
-	if req.ClientID == "" || req.ClientSecret == "" {
-		h.logger.Error("Missing client credentials",
-			zap.String("client_id", req.ClientID))
-		httperrors.RespondWithError(w, httperrors.ErrCodeValidation, "Missing client credentials", nil, http.StatusBadRequest)
-		return
-	}
-
 	var tokenPair *domain.TokenPair
 	var err error
 
@@ -142,44 +135,34 @@ func (h *OIDCHandler) TokenHandler(w http.ResponseWriter, r *http.Request) {
 	case "authorization_code":
 		if req.Code == "" {
 			h.logger.Error("Missing authorization code")
-			httperrors.RespondWithError(w, httperrors.ErrCodeValidation, "Missing authorization code", nil, http.StatusBadRequest)
+			errors.RespondWithError(w, domain.ErrInvalidField)
 			return
 		}
 
 		if req.RedirectURI == "" {
 			h.logger.Error("Missing redirect URI")
-			httperrors.RespondWithError(w, httperrors.ErrCodeValidation, "Missing redirect URI", nil, http.StatusBadRequest)
+			errors.RespondWithError(w, domain.ErrInvalidField)
 			return
 		}
 
 		if req.CodeVerifier == "" {
 			h.logger.Error("Missing code verifier")
-			httperrors.RespondWithError(w, httperrors.ErrCodeInvalidRequest, "PKCE is required", nil, http.StatusBadRequest)
+			errors.RespondWithError(w, domain.ErrInvalidPKCE)
 			return
 		}
 
 		tokenPair, err = h.oidcService.ExchangeCode(r.Context(), req.Code, req.CodeVerifier)
 		if err != nil {
 			h.logger.Error("ExchangeCode failed", zap.Error(err))
-			switch err {
-			case domain.ErrInvalidCredentials:
-				httperrors.RespondWithError(w, httperrors.ErrCodeAuthentication, "Invalid credentials", nil, http.StatusBadRequest)
-			case domain.ErrInvalidClient:
-				httperrors.RespondWithError(w, httperrors.ErrCodeAuthentication, "Invalid client", nil, http.StatusBadRequest)
-			case domain.ErrInvalidAuthorizationCode:
-				httperrors.RespondWithError(w, httperrors.ErrCodeInvalidRequest, "Invalid authorization code", nil, http.StatusBadRequest)
-			case domain.ErrInvalidPKCE:
-				httperrors.RespondWithError(w, httperrors.ErrCodeInvalidRequest, "Invalid PKCE", nil, http.StatusBadRequest)
-			default:
-				httperrors.RespondWithError(w, httperrors.ErrCodeInternal, "Token exchange failed", nil, http.StatusInternalServerError)
-			}
+			errors.RespondWithError(w, err.(domain.Error))
+
 			return
 		}
 
 	case "refresh_token":
 		if req.RefreshToken == "" {
 			h.logger.Error("Missing refresh token")
-			httperrors.RespondWithError(w, httperrors.ErrCodeValidation, "Missing refresh token", nil, http.StatusBadRequest)
+			errors.RespondWithError(w, domain.ErrInvalidField)
 			return
 		}
 
@@ -188,9 +171,9 @@ func (h *OIDCHandler) TokenHandler(w http.ResponseWriter, r *http.Request) {
 			h.logger.Error("RefreshToken failed", zap.Error(err))
 			switch err {
 			case domain.ErrInvalidCredentials:
-				httperrors.RespondWithError(w, httperrors.ErrCodeAuthentication, "Invalid credentials", nil, http.StatusBadRequest)
+				errors.RespondWithError(w, domain.ErrInvalidCredentials)
 			default:
-				httperrors.RespondWithError(w, httperrors.ErrCodeInternal, "Token refresh failed", nil, http.StatusInternalServerError)
+				errors.RespondWithError(w, domain.ErrInternal)
 			}
 			return
 		}
@@ -198,13 +181,13 @@ func (h *OIDCHandler) TokenHandler(w http.ResponseWriter, r *http.Request) {
 	default:
 		h.logger.Error("Unsupported grant type",
 			zap.String("grant_type", req.GrantType))
-		httperrors.RespondWithError(w, httperrors.ErrCodeInvalidRequest, "Unsupported grant type", nil, http.StatusBadRequest)
+		errors.RespondWithError(w, domain.ErrInvalidField)
 		return
 	}
 
 	if tokenPair == nil {
 		h.logger.Error("Token exchange returned nil tokens")
-		httperrors.RespondWithError(w, httperrors.ErrCodeInternal, "Token exchange failed", nil, http.StatusInternalServerError)
+		errors.RespondWithError(w, domain.ErrInternal)
 		return
 	}
 
@@ -214,7 +197,7 @@ func (h *OIDCHandler) TokenHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(tokenPair); err != nil {
 		h.logger.Error("Failed to encode response", zap.Error(err))
-		httperrors.RespondWithError(w, httperrors.ErrCodeInternal, "Failed to encode response", nil, http.StatusInternalServerError)
+		errors.RespondWithError(w, domain.ErrInternal)
 		return
 	}
 }
@@ -240,7 +223,7 @@ func (h *OIDCHandler) AuthorizeHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Validate required parameters
 	if clientID == "" || redirectURI == "" {
-		details := []httperrors.ErrorDetail{
+		details := []errors.ErrorDetail{
 			{
 				Field:   "client_id",
 				Message: "client_id is required",
@@ -250,27 +233,27 @@ func (h *OIDCHandler) AuthorizeHandler(w http.ResponseWriter, r *http.Request) {
 				Message: "redirect_uri is required",
 			},
 		}
-		httperrors.RespondWithError(w, httperrors.ErrCodeValidation, "Validation failed", details, http.StatusBadRequest)
+		errors.RespondErrorWithDetails(w, domain.ErrInvalidField, details)
 		return
 	}
 
 	// Validate response_type
 	if responseType != "code" {
 		h.logger.Error("Unsupported response type", zap.String("response_type", responseType))
-		httperrors.RespondWithError(w, httperrors.ErrCodeInvalidRequest, "Unsupported response type", nil, http.StatusBadRequest)
+		errors.RespondWithError(w, domain.ErrInvalidField)
 		return
 	}
 
 	// Validate PKCE parameters
 	if codeChallenge == "" {
 		h.logger.Error("Missing code challenge")
-		httperrors.RespondWithError(w, httperrors.ErrCodeInvalidRequest, "PKCE code challenge is required", nil, http.StatusBadRequest)
+		errors.RespondWithError(w, domain.ErrInvalidPKCE)
 		return
 	}
 
 	if codeChallengeMethod != "" && codeChallengeMethod != "S256" && codeChallengeMethod != "plain" {
 		h.logger.Error("Unsupported code challenge method", zap.String("method", codeChallengeMethod))
-		httperrors.RespondWithError(w, httperrors.ErrCodeInvalidRequest, "Unsupported code challenge method", nil, http.StatusBadRequest)
+		errors.RespondWithError(w, domain.ErrInvalidField)
 		return
 	}
 
@@ -278,7 +261,7 @@ func (h *OIDCHandler) AuthorizeHandler(w http.ResponseWriter, r *http.Request) {
 	userID, ok := r.Context().Value("sub").(string)
 	if !ok || userID == "" {
 		h.logger.Error("User not authenticated")
-		httperrors.RespondWithError(w, httperrors.ErrCodeAuthentication, "User not authenticated", nil, http.StatusUnauthorized)
+		errors.RespondWithError(w, domain.ErrUnauthorized)
 		return
 	}
 
@@ -292,11 +275,11 @@ func (h *OIDCHandler) AuthorizeHandler(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("Authorization failed", zap.Error(err))
 		switch err {
 		case domain.ErrInvalidClient:
-			httperrors.RespondWithError(w, httperrors.ErrCodeAuthentication, "Invalid client", nil, http.StatusBadRequest)
+			errors.RespondWithError(w, domain.ErrInvalidClient)
 		case domain.ErrInvalidCredentials:
-			httperrors.RespondWithError(w, httperrors.ErrCodeAuthentication, "User not authenticated", nil, http.StatusUnauthorized)
+			errors.RespondWithError(w, domain.ErrUnauthorized)
 		default:
-			httperrors.RespondWithError(w, httperrors.ErrCodeInternal, "Authorization failed", nil, http.StatusInternalServerError)
+			errors.RespondWithError(w, domain.ErrInternal)
 		}
 		return
 	}
@@ -307,7 +290,7 @@ func (h *OIDCHandler) AuthorizeHandler(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("Failed to parse redirect URI",
 			zap.String("redirect_uri", redirectURI),
 			zap.Error(err))
-		httperrors.RespondWithError(w, httperrors.ErrCodeInvalidRequest, "Invalid redirect URI", nil, http.StatusBadRequest)
+		errors.RespondWithError(w, domain.ErrInvalidField)
 		return
 	}
 

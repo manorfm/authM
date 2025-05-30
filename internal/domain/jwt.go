@@ -5,112 +5,19 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/ipede/user-manager-service/internal/infrastructure/config"
 )
-
-// Constants for JWT configuration
-const (
-	// Default token durations
-	DefaultAccessTokenDuration  = 15 * time.Minute
-	DefaultRefreshTokenDuration = 24 * time.Hour
-
-	// Minimum token durations
-	MinAccessTokenDuration  = 1 * time.Millisecond
-	MinRefreshTokenDuration = 1 * time.Second
-
-	// Maximum token durations
-	MaxAccessTokenDuration  = 1 * time.Hour
-	MaxRefreshTokenDuration = 30 * 24 * time.Hour // 30 days
-
-	// RSA key size
-	RSAKeySize = 2048
-
-	// JWKS cache duration
-	JWKSCacheDuration = 5 * time.Minute
-)
-
-// Custom JWT error types
-var (
-	ErrInvalidToken         = errors.New("invalid token")
-	ErrTokenExpired         = errors.New("token expired")
-	ErrTokenGeneration      = errors.New("failed to generate token")
-	ErrInvalidSigningMethod = errors.New("invalid signing method")
-	ErrInvalidClaims        = errors.New("invalid claims")
-	ErrSubjectMismatch      = errors.New("subject mismatch")
-	ErrTokenRevoked         = errors.New("token has been revoked")
-	ErrInvalidKeyConfig     = errors.New("invalid key configuration")
-	ErrInvalidDuration      = errors.New("invalid token duration")
-	ErrTokenBlacklisted     = errors.New("token is blacklisted")
-	ErrMalformedToken       = errors.New("malformed token")
-	ErrInvalidSignature     = errors.New("invalid signature")
-)
-
-// JWTError represents a JWT-specific error
-type JWTError struct {
-	Op  string // Operation that failed
-	Err error  // The underlying error
-}
-
-func (e *JWTError) Error() string {
-	if e.Err == nil {
-		return e.Op
-	}
-	return fmt.Sprintf("%s: %v", e.Op, e.Err)
-}
-
-func (e *JWTError) Unwrap() error {
-	return e.Err
-}
-
-// NewJWTError creates a new JWT error
-func NewJWTError(op string, err error) error {
-	return &JWTError{
-		Op:  op,
-		Err: err,
-	}
-}
-
-// JWTConfig holds the configuration for JWT service
-type JWTConfig struct {
-	AccessDuration  time.Duration
-	RefreshDuration time.Duration
-}
-
-// NewJWTConfig creates a new JWT configuration with default values
-func NewJWTConfig() *JWTConfig {
-	return &JWTConfig{
-		AccessDuration:  DefaultAccessTokenDuration,
-		RefreshDuration: DefaultRefreshTokenDuration,
-	}
-}
-
-// Validate validates the JWT configuration
-func (c *JWTConfig) Validate() error {
-	if c.AccessDuration < MinAccessTokenDuration || c.AccessDuration > MaxAccessTokenDuration {
-		return fmt.Errorf("%w: access duration must be between %v and %v",
-			ErrInvalidDuration, MinAccessTokenDuration, MaxAccessTokenDuration)
-	}
-	if c.RefreshDuration < MinRefreshTokenDuration || c.RefreshDuration > MaxRefreshTokenDuration {
-		return fmt.Errorf("%w: refresh duration must be between %v and %v",
-			ErrInvalidDuration, MinRefreshTokenDuration, MaxRefreshTokenDuration)
-	}
-	if c.RefreshDuration <= c.AccessDuration {
-		return fmt.Errorf("%w: refresh duration must be greater than access duration",
-			ErrInvalidDuration)
-	}
-	return nil
-}
 
 // JWT defines the interface for JWT operations
 type JWT struct {
 	privateKey   *rsa.PrivateKey
 	publicKey    *rsa.PublicKey
-	config       *JWTConfig
+	config       *config.Config
 	keyID        string
 	lastRotation time.Time
 	blacklist    map[string]time.Time // Token ID -> Expiration time
@@ -137,23 +44,23 @@ type Claims struct {
 func (c *Claims) Valid() error {
 	// Validate standard claims
 	if c.ExpiresAt != nil && c.ExpiresAt.Before(time.Now()) {
-		return NewJWTError("validate claims", ErrTokenExpired)
+		return ErrTokenExpired
 	}
 
 	if c.IssuedAt != nil && c.IssuedAt.After(time.Now()) {
-		return NewJWTError("validate claims", errors.New("token issued in the future"))
+		return ErrTokenIssuedInFuture
 	}
 
 	if c.NotBefore != nil && c.NotBefore.After(time.Now()) {
-		return NewJWTError("validate claims", errors.New("token not yet valid"))
+		return ErrTokenNotYetValid
 	}
 
 	if len(c.Roles) == 0 {
-		return NewJWTError("validate claims", errors.New("no roles assigned"))
+		return ErrTokenNoRoles
 	}
 
 	if c.Subject == "" {
-		return NewJWTError("validate claims", errors.New("subject is required"))
+		return ErrTokenSubjectRequired
 	}
 
 	return nil
@@ -163,37 +70,6 @@ func (c *Claims) Valid() error {
 type LoginResponse struct {
 	User  *User      `json:"user"`
 	Token *TokenPair `json:"token"`
-}
-
-// New creates a new JWT service
-func NewJWT(config *JWTConfig) (*JWT, error) {
-	if config == nil {
-		config = NewJWTConfig()
-	}
-
-	if err := config.Validate(); err != nil {
-		return nil, err
-	}
-
-	privateKey, err := rsa.GenerateKey(rand.Reader, RSAKeySize)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate RSA key: %w", err)
-	}
-
-	jwt := &JWT{
-		privateKey:   privateKey,
-		publicKey:    &privateKey.PublicKey,
-		config:       config,
-		lastRotation: time.Now(),
-		blacklist:    make(map[string]time.Time),
-	}
-
-	// Generate initial key ID
-	if err := jwt.RotateKey(); err != nil {
-		return nil, fmt.Errorf("failed to generate initial key ID: %w", err)
-	}
-
-	return jwt, nil
 }
 
 // GetPrivateKey returns the private key
@@ -208,16 +84,6 @@ func (j *JWT) GetPublicKey() *rsa.PublicKey {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
 	return j.publicKey
-}
-
-// GetAccessDuration returns the access token duration
-func (j *JWT) GetAccessDuration() time.Duration {
-	return j.config.AccessDuration
-}
-
-// GetRefreshDuration returns the refresh token duration
-func (j *JWT) GetRefreshDuration() time.Duration {
-	return j.config.RefreshDuration
 }
 
 // GetKeyID returns the current key ID
@@ -239,7 +105,7 @@ func (j *JWT) RotateKey() error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 
-	privateKey, err := rsa.GenerateKey(rand.Reader, RSAKeySize)
+	privateKey, err := rsa.GenerateKey(rand.Reader, j.config.RSAKeySize)
 	if err != nil {
 		return fmt.Errorf("failed to generate RSA key: %w", err)
 	}

@@ -16,6 +16,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/ipede/user-manager-service/internal/domain"
+	"github.com/ipede/user-manager-service/internal/infrastructure/config"
 	"go.uber.org/zap"
 )
 
@@ -23,7 +24,7 @@ import (
 type localStrategy struct {
 	privateKey   *rsa.PrivateKey
 	publicKey    *rsa.PublicKey
-	config       *domain.LocalConfig
+	config       *config.Config
 	logger       *zap.Logger
 	keyID        string
 	lastRotation time.Time
@@ -31,7 +32,7 @@ type localStrategy struct {
 }
 
 // NewLocalStrategy creates a new local strategy for JWT signing
-func NewLocalStrategy(config *domain.LocalConfig, logger *zap.Logger) (domain.JWTStrategy, error) {
+func NewLocalStrategy(config *config.Config, logger *zap.Logger) (domain.JWTStrategy, error) {
 	if config == nil {
 		return nil, domain.ErrInvalidKeyConfig
 	}
@@ -56,7 +57,7 @@ func NewLocalStrategy(config *domain.LocalConfig, logger *zap.Logger) (domain.JW
 // loadOrGenerateKeyPair loads the key pair from file or generates a new one
 func (l *localStrategy) loadOrGenerateKeyPair() error {
 	// Ensure directory exists
-	dir := filepath.Dir(l.config.KeyPath)
+	dir := filepath.Dir(l.config.JWTKeyPath)
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return domain.ErrInvalidKeyConfig
 	}
@@ -73,7 +74,7 @@ func (l *localStrategy) loadOrGenerateKeyPair() error {
 // loadKeyPair loads the key pair from file
 func (l *localStrategy) loadKeyPair() error {
 	// Read private key
-	privateKeyPEM, err := os.ReadFile(l.config.KeyPath)
+	privateKeyPEM, err := os.ReadFile(l.config.JWTKeyPath)
 	if err != nil {
 		return domain.ErrInvalidKeyConfig
 	}
@@ -98,7 +99,7 @@ func (l *localStrategy) loadKeyPair() error {
 // generateKeyPair generates a new RSA key pair
 func (l *localStrategy) generateKeyPair() error {
 	// Generate private key
-	privateKey, err := rsa.GenerateKey(rand.Reader, domain.RSAKeySize)
+	privateKey, err := rsa.GenerateKey(rand.Reader, l.config.RSAKeySize)
 	if err != nil {
 		return domain.ErrInvalidKeyConfig
 	}
@@ -110,7 +111,7 @@ func (l *localStrategy) generateKeyPair() error {
 	})
 
 	// Write private key to file
-	if err := os.WriteFile(l.config.KeyPath, privateKeyPEM, 0600); err != nil {
+	if err := os.WriteFile(l.config.JWTKeyPath, privateKeyPEM, 0600); err != nil {
 		return domain.ErrInvalidKeyConfig
 	}
 
@@ -182,22 +183,6 @@ func generateKeyID(key *rsa.PrivateKey) string {
 
 	// Encode as base64url without padding
 	return base64.RawURLEncoding.EncodeToString(hash[:])
-}
-
-// GetAccessDuration returns the access token duration
-func (l *localStrategy) GetAccessDuration() time.Duration {
-	if l.config.AccessDuration > 0 {
-		return l.config.AccessDuration
-	}
-	return domain.DefaultAccessTokenDuration
-}
-
-// GetRefreshDuration returns the refresh token duration
-func (l *localStrategy) GetRefreshDuration() time.Duration {
-	if l.config.RefreshDuration > 0 {
-		return l.config.RefreshDuration
-	}
-	return domain.DefaultRefreshTokenDuration
 }
 
 // Verify verifies a JWT token using the local private key

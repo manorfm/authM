@@ -13,42 +13,12 @@ import (
 	"github.com/ipede/user-manager-service/internal/domain"
 	"github.com/ipede/user-manager-service/internal/infrastructure/config"
 	"github.com/ipede/user-manager-service/internal/infrastructure/jwt"
-	httperrors "github.com/ipede/user-manager-service/internal/interfaces/http/errors"
+	"github.com/ipede/user-manager-service/internal/interfaces/http/errors"
 	"github.com/oklog/ulid/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"
 )
-
-// OpenIDConfiguration represents the OpenID configuration structure
-type OpenIDConfiguration struct {
-	Issuer                   string   `json:"issuer"`
-	AuthorizationEndpoint    string   `json:"authorization_endpoint"`
-	TokenEndpoint            string   `json:"token_endpoint"`
-	UserInfoEndpoint         string   `json:"userinfo_endpoint"`
-	JWKSURI                  string   `json:"jwks_uri"`
-	ResponseTypes            []string `json:"response_types_supported"`
-	SubjectTypes             []string `json:"subject_types_supported"`
-	IDTokenSigningAlgs       []string `json:"id_token_signing_alg_values_supported"`
-	ScopesSupported          []string `json:"scopes_supported"`
-	TokenEndpointAuthMethods []string `json:"token_endpoint_auth_methods_supported"`
-	ClaimsSupported          []string `json:"claims_supported"`
-}
-
-// JWKS represents the JSON Web Key Set structure
-type JWKS struct {
-	Keys []JWK `json:"keys"`
-}
-
-// JWK represents a JSON Web Key
-type JWK struct {
-	Kty string `json:"kty"`
-	Alg string `json:"alg"`
-	Use string `json:"use"`
-	Kid string `json:"kid"`
-	N   string `json:"n"`
-	E   string `json:"e"`
-}
 
 // MockAuthService is a mock implementation of domain.AuthService
 type MockAuthService struct {
@@ -245,9 +215,11 @@ func getJWTService(t *testing.T) domain.JWTService {
 		VaultMountPath:     "transit",
 		VaultKeyName:       "test-key",
 		ServerPort:         8080,
+		RSAKeySize:         2048,
+		JWKSCacheDuration:  1 * time.Hour,
 	}
 	strategy := jwt.NewCompositeStrategy(cfg, logger)
-	return jwt.NewJWTService(strategy, logger)
+	return jwt.NewJWTService(strategy, cfg, logger)
 }
 
 func TestHandleOpenIDConfiguration(t *testing.T) {
@@ -296,8 +268,8 @@ func TestHandleOpenIDConfiguration(t *testing.T) {
 			},
 			expectedStatus: http.StatusInternalServerError,
 			expectedBody: map[string]interface{}{
-				"code":    httperrors.ErrCodeInternal,
-				"message": "Failed to get OpenID configuration",
+				"code":    domain.ErrInternal.GetCode(),
+				"message": "Internal server error",
 			},
 		},
 	}
@@ -360,9 +332,9 @@ func TestHandleJWKS(t *testing.T) {
 				getJWKSError: domain.ErrInternal,
 			},
 			expectedStatus: http.StatusInternalServerError,
-			expectedBody: httperrors.ErrorResponse{
-				Code:    httperrors.ErrCodeInternal,
-				Message: "Failed to get JWKS",
+			expectedBody: errors.ErrorResponse{
+				Code:    domain.ErrInternal.GetCode(),
+				Message: "Internal server error",
 			},
 		},
 		{
@@ -371,9 +343,9 @@ func TestHandleJWKS(t *testing.T) {
 				getJWKSResponse: nil,
 			},
 			expectedStatus: http.StatusInternalServerError,
-			expectedBody: httperrors.ErrorResponse{
-				Code:    httperrors.ErrCodeInternal,
-				Message: "Failed to get JWKS",
+			expectedBody: errors.ErrorResponse{
+				Code:    domain.ErrInternal.GetCode(),
+				Message: "Internal server error",
 			},
 		},
 	}
@@ -408,10 +380,10 @@ func TestHandleJWKS(t *testing.T) {
 				assert.Contains(t, key, "n")
 				assert.Contains(t, key, "e")
 			} else {
-				var response httperrors.ErrorResponse
+				var response errors.ErrorResponse
 				err := json.NewDecoder(rec.Body).Decode(&response)
 				assert.NoError(t, err)
-				assert.Equal(t, tt.expectedBody.(httperrors.ErrorResponse), response)
+				assert.Equal(t, tt.expectedBody.(errors.ErrorResponse), response)
 			}
 		})
 	}
@@ -453,14 +425,6 @@ func (m *mockJWTService) RotateKeys() error {
 
 func (m *mockJWTService) TryVault() error {
 	return nil
-}
-
-func (m *mockJWTService) GetLastRotation() time.Time {
-	return time.Now()
-}
-
-func (m *mockJWTService) GetAccessDuration() time.Duration {
-	return domain.DefaultAccessTokenDuration
 }
 
 func TestHandleAuthorize(t *testing.T) {
@@ -507,9 +471,9 @@ func TestHandleAuthorize(t *testing.T) {
 				// No mock setup needed
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedBody: httperrors.ErrorResponse{
-				Code:    httperrors.ErrCodeInvalidRequest,
-				Message: "Unsupported response type",
+			expectedBody: errors.ErrorResponse{
+				Code:    domain.ErrInvalidField.GetCode(),
+				Message: "Invalid field",
 			},
 		},
 		{
@@ -525,9 +489,9 @@ func TestHandleAuthorize(t *testing.T) {
 				// No mock setup needed
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedBody: httperrors.ErrorResponse{
-				Code:    httperrors.ErrCodeInvalidRequest,
-				Message: "Unsupported response type",
+			expectedBody: errors.ErrorResponse{
+				Code:    domain.ErrInvalidField.GetCode(),
+				Message: "Invalid field",
 			},
 		},
 		{
@@ -541,10 +505,10 @@ func TestHandleAuthorize(t *testing.T) {
 				// No mock setup needed
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedBody: httperrors.ErrorResponse{
-				Code:    httperrors.ErrCodeValidation,
-				Message: "Validation failed",
-				Details: []httperrors.ErrorDetail{
+			expectedBody: errors.ErrorResponse{
+				Code:    domain.ErrInvalidField.GetCode(),
+				Message: "Invalid field",
+				Details: []errors.ErrorDetail{
 					{
 						Field:   "client_id",
 						Message: "client_id is required",
@@ -572,8 +536,8 @@ func TestHandleAuthorize(t *testing.T) {
 					Return("", domain.ErrInvalidClient)
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedBody: httperrors.ErrorResponse{
-				Code:    httperrors.ErrCodeAuthentication,
+			expectedBody: errors.ErrorResponse{
+				Code:    domain.ErrInvalidClient.GetCode(),
 				Message: "Invalid client",
 			},
 		},
@@ -608,9 +572,9 @@ func TestHandleAuthorize(t *testing.T) {
 				// No mock setup needed
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedBody: httperrors.ErrorResponse{
-				Code:    httperrors.ErrCodeInvalidRequest,
-				Message: "PKCE code challenge is required",
+			expectedBody: errors.ErrorResponse{
+				Code:    domain.ErrInvalidPKCE.GetCode(),
+				Message: "Invalid PKCE",
 			},
 		},
 		{
@@ -628,9 +592,9 @@ func TestHandleAuthorize(t *testing.T) {
 				// No mock setup needed
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedBody: httperrors.ErrorResponse{
-				Code:    httperrors.ErrCodeInvalidRequest,
-				Message: "Unsupported code challenge method",
+			expectedBody: errors.ErrorResponse{
+				Code:    domain.ErrInvalidField.GetCode(),
+				Message: "Invalid field",
 			},
 		},
 	}
@@ -663,10 +627,10 @@ func TestHandleAuthorize(t *testing.T) {
 				location := rr.Header().Get("Location")
 				assert.Equal(t, tt.expectedRedirect, location)
 			} else {
-				var response httperrors.ErrorResponse
+				var response errors.ErrorResponse
 				err := json.NewDecoder(rr.Body).Decode(&response)
 				assert.NoError(t, err)
-				assert.Equal(t, tt.expectedBody.(httperrors.ErrorResponse), response)
+				assert.Equal(t, tt.expectedBody.(errors.ErrorResponse), response)
 			}
 
 			mockService.AssertExpectations(t)
@@ -696,9 +660,19 @@ func TestHandleToken(t *testing.T) {
 				// No mock setup needed for validation error
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedBody: httperrors.ErrorResponse{
-				Code:    httperrors.ErrCodeValidation,
-				Message: "Missing client credentials",
+			expectedBody: errors.ErrorResponse{
+				Code:    domain.ErrInvalidField.GetCode(),
+				Message: "Invalid field",
+				Details: []errors.ErrorDetail{
+					{
+						Field:   "clientID",
+						Message: "clientID is required",
+					},
+					{
+						Field:   "clientSecret",
+						Message: "clientSecret is required",
+					},
+				},
 			},
 		},
 		{
@@ -715,9 +689,9 @@ func TestHandleToken(t *testing.T) {
 				// No mock setup needed for invalid grant type
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedBody: httperrors.ErrorResponse{
-				Code:    httperrors.ErrCodeInvalidRequest,
-				Message: "Unsupported grant type",
+			expectedBody: errors.ErrorResponse{
+				Code:    domain.ErrInvalidField.GetCode(),
+				Message: "Invalid field",
 			},
 		},
 		{
@@ -734,9 +708,9 @@ func TestHandleToken(t *testing.T) {
 				// No mock setup needed
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedBody: httperrors.ErrorResponse{
-				Code:    httperrors.ErrCodeInvalidRequest,
-				Message: "PKCE is required",
+			expectedBody: errors.ErrorResponse{
+				Code:    domain.ErrInvalidPKCE.GetCode(),
+				Message: "Invalid PKCE",
 			},
 		},
 		{
@@ -754,8 +728,8 @@ func TestHandleToken(t *testing.T) {
 					Return(nil, domain.ErrInvalidCredentials)
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedBody: httperrors.ErrorResponse{
-				Code:    httperrors.ErrCodeAuthentication,
+			expectedBody: errors.ErrorResponse{
+				Code:    domain.ErrInvalidCredentials.GetCode(),
 				Message: "Invalid credentials",
 			},
 		},
@@ -774,8 +748,8 @@ func TestHandleToken(t *testing.T) {
 					Return(nil, domain.ErrInvalidClient)
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedBody: httperrors.ErrorResponse{
-				Code:    httperrors.ErrCodeAuthentication,
+			expectedBody: errors.ErrorResponse{
+				Code:    domain.ErrInvalidClient.GetCode(),
 				Message: "Invalid client",
 			},
 		},
@@ -794,8 +768,8 @@ func TestHandleToken(t *testing.T) {
 					Return(nil, domain.ErrInvalidPKCE)
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedBody: httperrors.ErrorResponse{
-				Code:    httperrors.ErrCodeInvalidRequest,
+			expectedBody: errors.ErrorResponse{
+				Code:    domain.ErrInvalidPKCE.GetCode(),
 				Message: "Invalid PKCE",
 			},
 		},
@@ -851,10 +825,10 @@ func TestHandleToken(t *testing.T) {
 				assert.NoError(t, err)
 				assert.Equal(t, tt.expectedBody.(*domain.TokenPair), &response)
 			} else {
-				var response httperrors.ErrorResponse
+				var response errors.ErrorResponse
 				err := json.NewDecoder(rr.Body).Decode(&response)
 				assert.NoError(t, err)
-				assert.Equal(t, tt.expectedBody.(httperrors.ErrorResponse), response)
+				assert.Equal(t, tt.expectedBody.(errors.ErrorResponse), response)
 			}
 
 			mockService.AssertExpectations(t)
@@ -884,9 +858,9 @@ func TestHandleUserInfo(t *testing.T) {
 				// No mock setup needed
 			},
 			expectedStatus: http.StatusUnauthorized,
-			expectedBody: httperrors.ErrorResponse{
-				Code:    httperrors.ErrCodeAuthentication,
-				Message: "User not authenticated",
+			expectedBody: errors.ErrorResponse{
+				Code:    domain.ErrUnauthorized.GetCode(),
+				Message: "Unauthorized",
 			},
 		},
 		{
@@ -919,9 +893,9 @@ func TestHandleUserInfo(t *testing.T) {
 					Return(nil, domain.ErrInternal)
 			},
 			expectedStatus: http.StatusInternalServerError,
-			expectedBody: httperrors.ErrorResponse{
-				Code:    httperrors.ErrCodeInternal,
-				Message: "Failed to get user info",
+			expectedBody: errors.ErrorResponse{
+				Code:    domain.ErrInternal.GetCode(),
+				Message: "Internal server error",
 			},
 		},
 	}
@@ -949,7 +923,7 @@ func TestHandleUserInfo(t *testing.T) {
 				assert.NoError(t, err)
 				assert.Equal(t, tt.expectedBody, response)
 			} else {
-				var response httperrors.ErrorResponse
+				var response errors.ErrorResponse
 				err := json.NewDecoder(rr.Body).Decode(&response)
 				assert.NoError(t, err)
 				assert.Equal(t, tt.expectedBody, response)
@@ -1099,9 +1073,9 @@ func TestOIDCHandler_GetOpenIDConfigurationHandler(t *testing.T) {
 					Return(nil, domain.ErrInternal)
 			},
 			expectedStatus: http.StatusInternalServerError,
-			expectedBody: httperrors.ErrorResponse{
-				Code:    httperrors.ErrCodeInternal,
-				Message: "Failed to get OpenID configuration",
+			expectedBody: errors.ErrorResponse{
+				Code:    domain.ErrInternal.GetCode(),
+				Message: "Internal server error",
 			},
 		},
 	}
@@ -1124,7 +1098,7 @@ func TestOIDCHandler_GetOpenIDConfigurationHandler(t *testing.T) {
 				assert.NoError(t, err)
 				assert.Equal(t, tt.expectedBody, response)
 			} else {
-				var response httperrors.ErrorResponse
+				var response errors.ErrorResponse
 				err := json.NewDecoder(rr.Body).Decode(&response)
 				assert.NoError(t, err)
 				assert.Equal(t, tt.expectedBody, response)
@@ -1179,9 +1153,9 @@ func TestOIDCHandler_AuthorizeHandler(t *testing.T) {
 				// No mock setup needed
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedBody: httperrors.ErrorResponse{
-				Code:    httperrors.ErrCodeInvalidRequest,
-				Message: "Unsupported response type",
+			expectedBody: errors.ErrorResponse{
+				Code:    domain.ErrInvalidField.GetCode(),
+				Message: "Invalid field",
 			},
 		},
 		{
@@ -1197,9 +1171,9 @@ func TestOIDCHandler_AuthorizeHandler(t *testing.T) {
 				// No mock setup needed
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedBody: httperrors.ErrorResponse{
-				Code:    httperrors.ErrCodeInvalidRequest,
-				Message: "Unsupported response type",
+			expectedBody: errors.ErrorResponse{
+				Code:    domain.ErrInvalidField.GetCode(),
+				Message: "Invalid field",
 			},
 		},
 		{
@@ -1213,10 +1187,10 @@ func TestOIDCHandler_AuthorizeHandler(t *testing.T) {
 				// No mock setup needed
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedBody: httperrors.ErrorResponse{
-				Code:    httperrors.ErrCodeValidation,
-				Message: "Validation failed",
-				Details: []httperrors.ErrorDetail{
+			expectedBody: errors.ErrorResponse{
+				Code:    domain.ErrInvalidField.GetCode(),
+				Message: "Invalid field",
+				Details: []errors.ErrorDetail{
 					{
 						Field:   "client_id",
 						Message: "client_id is required",
@@ -1244,8 +1218,8 @@ func TestOIDCHandler_AuthorizeHandler(t *testing.T) {
 					Return("", domain.ErrInvalidClient)
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedBody: httperrors.ErrorResponse{
-				Code:    httperrors.ErrCodeAuthentication,
+			expectedBody: errors.ErrorResponse{
+				Code:    domain.ErrInvalidClient.GetCode(),
 				Message: "Invalid client",
 			},
 		},
@@ -1280,9 +1254,9 @@ func TestOIDCHandler_AuthorizeHandler(t *testing.T) {
 				// No mock setup needed
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedBody: httperrors.ErrorResponse{
-				Code:    httperrors.ErrCodeInvalidRequest,
-				Message: "PKCE code challenge is required",
+			expectedBody: errors.ErrorResponse{
+				Code:    domain.ErrInvalidPKCE.GetCode(),
+				Message: "Invalid PKCE",
 			},
 		},
 		{
@@ -1300,9 +1274,9 @@ func TestOIDCHandler_AuthorizeHandler(t *testing.T) {
 				// No mock setup needed
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedBody: httperrors.ErrorResponse{
-				Code:    httperrors.ErrCodeInvalidRequest,
-				Message: "Unsupported code challenge method",
+			expectedBody: errors.ErrorResponse{
+				Code:    domain.ErrInvalidField.GetCode(),
+				Message: "Invalid field",
 			},
 		},
 	}
@@ -1335,10 +1309,10 @@ func TestOIDCHandler_AuthorizeHandler(t *testing.T) {
 				location := rr.Header().Get("Location")
 				assert.Equal(t, tt.expectedRedirect, location)
 			} else {
-				var response httperrors.ErrorResponse
+				var response errors.ErrorResponse
 				err := json.NewDecoder(rr.Body).Decode(&response)
 				assert.NoError(t, err)
-				assert.Equal(t, tt.expectedBody.(httperrors.ErrorResponse), response)
+				assert.Equal(t, tt.expectedBody.(errors.ErrorResponse), response)
 			}
 
 			mockService.AssertExpectations(t)

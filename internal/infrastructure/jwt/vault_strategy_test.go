@@ -11,6 +11,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/hashicorp/vault/api"
 	"github.com/ipede/user-manager-service/internal/domain"
+	"github.com/ipede/user-manager-service/internal/infrastructure/config"
 	"github.com/oklog/ulid/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -116,11 +117,11 @@ func TestVaultStrategy(t *testing.T) {
 	logger, err := zap.NewDevelopment()
 	require.NoError(t, err)
 
-	config := &domain.VaultConfig{
-		Address:   vaultAddr,
-		Token:     vaultToken,
-		MountPath: "transit",
-		KeyName:   "test-key",
+	config := &config.Config{
+		VaultAddress:   vaultAddr,
+		VaultToken:     vaultToken,
+		VaultMountPath: "transit",
+		VaultKeyName:   "test-key",
 	}
 
 	t.Run("new strategy", func(t *testing.T) {
@@ -131,17 +132,6 @@ func TestVaultStrategy(t *testing.T) {
 
 		// Verificar se a estratégia foi criada corretamente
 		assert.NotEmpty(t, strategy.GetKeyID())
-	})
-
-	t.Run("token durations", func(t *testing.T) {
-		// Create a mock Vault strategy
-		strategy := &vaultStrategy{
-			config: config,
-			logger: logger,
-		}
-
-		assert.Equal(t, domain.DefaultAccessTokenDuration, strategy.GetAccessDuration())
-		assert.Equal(t, domain.DefaultRefreshTokenDuration, strategy.GetRefreshDuration())
 	})
 
 	t.Run("key rotation", func(t *testing.T) {
@@ -221,13 +211,11 @@ func getVaultStrategy(t *testing.T) *vaultStrategy {
 	logger, err := zap.NewDevelopment()
 	require.NoError(t, err)
 
-	config := &domain.VaultConfig{
-		Address:         vaultAddr,
-		Token:           vaultToken,
-		MountPath:       "transit",
-		KeyName:         "test-key",
-		AccessDuration:  time.Hour,
-		RefreshDuration: 24 * time.Hour,
+	config := &config.Config{
+		VaultAddress:   vaultAddr,
+		VaultToken:     vaultToken,
+		VaultMountPath: "transit",
+		VaultKeyName:   "test-key",
 	}
 
 	strategy, err := NewVaultStrategy(config, logger)

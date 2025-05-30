@@ -29,13 +29,14 @@ func TestCompositeStrategyIntegration(t *testing.T) {
 
 	// Create test config
 	cfg := &config.Config{
-		JWTAccessDuration:  domain.DefaultAccessTokenDuration,
-		JWTRefreshDuration: domain.DefaultRefreshTokenDuration,
+		JWTAccessDuration:  time.Duration(15 * time.Minute),
+		JWTRefreshDuration: time.Duration(24 * time.Hour),
 		JWTKeyPath:         filepath.Join(tempDir, "test-key"),
 		VaultAddress:       "http://localhost:8200",
 		VaultToken:         "test-token",
 		VaultMountPath:     "transit",
 		VaultKeyName:       "test-key",
+		RSAKeySize:         2048,
 	}
 
 	t.Run("new strategy", func(t *testing.T) {
@@ -90,13 +91,6 @@ func TestCompositeStrategyIntegration(t *testing.T) {
 
 		// Check key ID changed
 		assert.NotEqual(t, initialKeyID, strategy.GetKeyID())
-	})
-
-	t.Run("token durations", func(t *testing.T) {
-		strategy := NewCompositeStrategy(cfg, logger)
-
-		assert.Equal(t, domain.DefaultAccessTokenDuration, strategy.GetAccessDuration())
-		assert.Equal(t, domain.DefaultRefreshTokenDuration, strategy.GetRefreshDuration())
 	})
 
 	t.Run("try vault", func(t *testing.T) {

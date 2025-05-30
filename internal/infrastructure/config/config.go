@@ -5,7 +5,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/ipede/user-manager-service/internal/domain"
 	"github.com/joho/godotenv"
 )
 
@@ -31,6 +30,12 @@ type Config struct {
 
 	// Server configuration
 	ServerPort int
+
+	// RSA key size
+	RSAKeySize int
+
+	// JWKS cache duration
+	JWKSCacheDuration time.Duration
 }
 
 // NewConfig creates a new configuration with default values
@@ -44,8 +49,8 @@ func NewConfig() *Config {
 		DBName:     "",
 
 		// JWT defaults
-		JWTAccessDuration:  domain.DefaultAccessTokenDuration,
-		JWTRefreshDuration: domain.DefaultRefreshTokenDuration,
+		JWTAccessDuration:  time.Duration(15 * time.Minute),
+		JWTRefreshDuration: time.Duration(24 * time.Hour),
 		JWTKeyPath:         "",
 
 		// Vault defaults

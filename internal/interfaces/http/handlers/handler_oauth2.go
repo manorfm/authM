@@ -8,7 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
 	"github.com/ipede/user-manager-service/internal/domain"
-	httperrors "github.com/ipede/user-manager-service/internal/interfaces/http/errors"
+	"github.com/ipede/user-manager-service/internal/interfaces/http/errors"
 	"go.uber.org/zap"
 )
 
@@ -40,7 +40,7 @@ func (h *OAuth2Handler) CreateClientHandler(w http.ResponseWriter, r *http.Reque
 	var req OAuth2ClientRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.logger.Error("Failed to decode request body", zap.Error(err))
-		httperrors.RespondWithError(w, httperrors.ErrCodeInvalidRequest, "Invalid request body", nil, http.StatusBadRequest)
+		errors.RespondWithError(w, domain.ErrPathNotFound)
 		return
 	}
 
@@ -51,10 +51,10 @@ func (h *OAuth2Handler) CreateClientHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	// Check if client already exists
-	existingClient, err := h.oauthRepo.FindClientByID(r.Context(), req.ID)
-	if err == nil && existingClient != nil {
+	exists, err := h.oauthRepo.FindClientByID(r.Context(), req.ID)
+	if err == nil && exists != nil {
 		h.logger.Error("Client already exists", zap.String("client_id", req.ID))
-		httperrors.RespondWithError(w, httperrors.ErrCodeConflict, "Client already exists", nil, http.StatusConflict)
+		errors.RespondWithError(w, domain.ErrClientAlreadyExists)
 		return
 	}
 
@@ -72,7 +72,7 @@ func (h *OAuth2Handler) CreateClientHandler(w http.ResponseWriter, r *http.Reque
 	// Save client to repository
 	if err := h.oauthRepo.CreateClient(r.Context(), client); err != nil {
 		h.logger.Error("Failed to create OAuth2 client", zap.Error(err))
-		httperrors.RespondWithError(w, httperrors.ErrCodeInternal, "Failed to create OAuth2 client", nil, http.StatusInternalServerError)
+		errors.RespondWithError(w, domain.ErrInternal)
 		return
 	}
 
@@ -89,14 +89,14 @@ func (h *OAuth2Handler) UpdateClientHandler(w http.ResponseWriter, r *http.Reque
 	clientID := chi.URLParam(r, "id")
 	if clientID == "" {
 		h.logger.Error("Missing client ID in URL")
-		httperrors.RespondWithError(w, httperrors.ErrCodeValidation, "Client ID is required", nil, http.StatusBadRequest)
+		errors.RespondWithError(w, domain.ErrPathNotFound)
 		return
 	}
 
 	var req OAuth2ClientRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.logger.Error("Failed to decode request body", zap.Error(err))
-		httperrors.RespondWithError(w, httperrors.ErrCodeInvalidRequest, "Invalid request body", nil, http.StatusBadRequest)
+		errors.RespondWithError(w, domain.ErrInvalidRequestBody)
 		return
 	}
 
@@ -108,27 +108,23 @@ func (h *OAuth2Handler) UpdateClientHandler(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Check if client exists
-	existingClient, err := h.oauthRepo.FindClientByID(r.Context(), clientID)
+	client, err := h.oauthRepo.FindClientByID(r.Context(), clientID)
 	if err != nil {
 		h.logger.Error("Failed to find client", zap.String("client_id", clientID), zap.Error(err))
-		if err == domain.ErrInvalidClient {
-			httperrors.RespondWithError(w, httperrors.ErrCodeNotFound, "Client not found", nil, http.StatusNotFound)
-		} else {
-			httperrors.RespondWithError(w, httperrors.ErrCodeInternal, "Failed to find client", nil, http.StatusInternalServerError)
-		}
+		errors.RespondWithError(w, domain.ErrClientNotFound)
 		return
 	}
 
 	// Update client
-	existingClient.Secret = req.Secret
-	existingClient.RedirectURIs = req.RedirectURIs
-	existingClient.GrantTypes = req.GrantTypes
-	existingClient.Scopes = req.Scopes
-	existingClient.UpdatedAt = time.Now()
+	client.Secret = req.Secret
+	client.RedirectURIs = req.RedirectURIs
+	client.GrantTypes = req.GrantTypes
+	client.Scopes = req.Scopes
+	client.UpdatedAt = time.Now()
 
-	if err := h.oauthRepo.UpdateClient(r.Context(), existingClient); err != nil {
+	if err := h.oauthRepo.UpdateClient(r.Context(), client); err != nil {
 		h.logger.Error("Failed to update OAuth2 client", zap.Error(err))
-		httperrors.RespondWithError(w, httperrors.ErrCodeInternal, "Failed to update OAuth2 client", nil, http.StatusInternalServerError)
+		errors.RespondWithError(w, domain.ErrInternal)
 		return
 	}
 
@@ -136,7 +132,7 @@ func (h *OAuth2Handler) UpdateClientHandler(w http.ResponseWriter, r *http.Reque
 
 	// Return updated client
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(existingClient)
+	json.NewEncoder(w).Encode(client)
 }
 
 // DeleteClientHandler handles deleting an OAuth2 client
@@ -144,7 +140,7 @@ func (h *OAuth2Handler) DeleteClientHandler(w http.ResponseWriter, r *http.Reque
 	clientID := chi.URLParam(r, "id")
 	if clientID == "" {
 		h.logger.Error("Missing client ID in URL")
-		httperrors.RespondWithError(w, httperrors.ErrCodeValidation, "Client ID is required", nil, http.StatusBadRequest)
+		errors.RespondWithError(w, domain.ErrPathNotFound)
 		return
 	}
 
@@ -152,18 +148,14 @@ func (h *OAuth2Handler) DeleteClientHandler(w http.ResponseWriter, r *http.Reque
 	_, err := h.oauthRepo.FindClientByID(r.Context(), clientID)
 	if err != nil {
 		h.logger.Error("Failed to find client", zap.String("client_id", clientID), zap.Error(err))
-		if err == domain.ErrInvalidClient {
-			httperrors.RespondWithError(w, httperrors.ErrCodeNotFound, "Client not found", nil, http.StatusNotFound)
-		} else {
-			httperrors.RespondWithError(w, httperrors.ErrCodeInternal, "Failed to find client", nil, http.StatusInternalServerError)
-		}
+		errors.RespondWithError(w, err.(domain.Error))
 		return
 	}
 
 	// Delete client
 	if err := h.oauthRepo.DeleteClient(r.Context(), clientID); err != nil {
 		h.logger.Error("Failed to delete OAuth2 client", zap.Error(err))
-		httperrors.RespondWithError(w, httperrors.ErrCodeInternal, "Failed to delete OAuth2 client", nil, http.StatusInternalServerError)
+		errors.RespondWithError(w, domain.ErrInternal)
 		return
 	}
 
@@ -177,7 +169,7 @@ func (h *OAuth2Handler) ListClientsHandler(w http.ResponseWriter, r *http.Reques
 	clients, err := h.oauthRepo.ListClients(r.Context())
 	if err != nil {
 		h.logger.Error("Failed to list OAuth2 clients", zap.Error(err))
-		httperrors.RespondWithError(w, httperrors.ErrCodeInternal, "Failed to list OAuth2 clients", nil, http.StatusInternalServerError)
+		errors.RespondWithError(w, domain.ErrInternal)
 		return
 	}
 
@@ -192,14 +184,14 @@ func (h *OAuth2Handler) GetClientHandler(w http.ResponseWriter, r *http.Request)
 	clientID := chi.URLParam(r, "id")
 	if clientID == "" {
 		h.logger.Error("Missing client ID in URL")
-		httperrors.RespondWithError(w, httperrors.ErrCodeValidation, "Client ID is required", nil, http.StatusBadRequest)
+		errors.RespondWithError(w, domain.ErrPathNotFound)
 		return
 	}
 
 	client, err := h.oauthRepo.FindClientByID(r.Context(), clientID)
 	if err != nil {
 		h.logger.Error("Failed to find client", zap.String("client_id", clientID), zap.Error(err))
-		httperrors.RespondWithError(w, httperrors.ErrCodeNotFound, "Client ID not found", nil, http.StatusNotFound)
+		errors.RespondWithError(w, domain.ErrClientNotFound)
 		return
 	}
 

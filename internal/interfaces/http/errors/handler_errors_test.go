@@ -6,50 +6,48 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/ipede/user-manager-service/internal/domain"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestRespondWithError(t *testing.T) {
 	tests := []struct {
 		name           string
-		code           string
-		message        string
+		err            domain.Error
 		details        []ErrorDetail
 		status         int
 		expectedBody   ErrorResponse
 		expectedStatus int
 	}{
 		{
-			name:    "validation error",
-			code:    ErrCodeValidation,
-			message: "Validation failed",
+			name: "validation error",
+			err:  domain.ErrInvalidField,
 			details: []ErrorDetail{
 				{
-					Field:   "email",
-					Message: "email is required",
+					Field:   "Email",
+					Message: "Email is required",
 				},
 			},
 			status: http.StatusBadRequest,
 			expectedBody: ErrorResponse{
-				Code:    ErrCodeValidation,
-				Message: "Validation failed",
+				Code:    "U0011",
+				Message: "Invalid field",
 				Details: []ErrorDetail{
 					{
-						Field:   "email",
-						Message: "email is required",
+						Field:   "Email",
+						Message: "Email is required",
 					},
 				},
 			},
 			expectedStatus: http.StatusBadRequest,
 		},
 		{
-			name:    "authentication error",
-			code:    ErrCodeAuthentication,
-			message: "Invalid credentials",
-			status:  http.StatusUnauthorized,
+			name:   "authentication error",
+			err:    domain.ErrUnauthorized,
+			status: http.StatusBadRequest,
 			expectedBody: ErrorResponse{
-				Code:    ErrCodeAuthentication,
-				Message: "Invalid credentials",
+				Code:    "U0014",
+				Message: "Unauthorized",
 			},
 			expectedStatus: http.StatusUnauthorized,
 		},
@@ -58,7 +56,12 @@ func TestRespondWithError(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
-			RespondWithError(w, tt.code, tt.message, tt.details, tt.status)
+
+			if tt.details != nil {
+				RespondErrorWithDetails(w, tt.err, tt.details)
+			} else {
+				RespondWithError(w, tt.err)
+			}
 
 			assert.Equal(t, tt.expectedStatus, w.Code)
 			assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
@@ -69,39 +72,4 @@ func TestRespondWithError(t *testing.T) {
 			assert.Equal(t, tt.expectedBody, response)
 		})
 	}
-}
-
-func TestValidationErrors(t *testing.T) {
-	t.Run("add validation error", func(t *testing.T) {
-		var errors ValidationErrors
-		errors.Add("email", "email is required")
-		errors.Add("password", "password is required")
-
-		assert.Equal(t, 2, len(errors))
-		assert.Equal(t, "email", errors[0].Field)
-		assert.Equal(t, "email is required", errors[0].Message)
-		assert.Equal(t, "password", errors[1].Field)
-		assert.Equal(t, "password is required", errors[1].Message)
-	})
-
-	t.Run("has errors", func(t *testing.T) {
-		var errors ValidationErrors
-		assert.False(t, errors.HasErrors())
-
-		errors.Add("email", "email is required")
-		assert.True(t, errors.HasErrors())
-	})
-
-	t.Run("to error details", func(t *testing.T) {
-		var errors ValidationErrors
-		errors.Add("email", "email is required")
-		errors.Add("password", "password is required")
-
-		details := errors.ToErrorDetails()
-		assert.Equal(t, 2, len(details))
-		assert.Equal(t, "email", details[0].Field)
-		assert.Equal(t, "email is required", details[0].Message)
-		assert.Equal(t, "password", details[1].Field)
-		assert.Equal(t, "password is required", details[1].Message)
-	})
 }

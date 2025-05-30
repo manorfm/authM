@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/ipede/user-manager-service/internal/domain"
@@ -27,7 +28,7 @@ func (h *HandlerAuth) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 
 	defer r.Body.Close()
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		errors.RespondWithErrorBusiness(w, domain.ErrInvalidRequestBody)
+		errors.RespondWithError(w, domain.ErrInvalidRequestBody)
 		return
 	}
 
@@ -40,7 +41,7 @@ func (h *HandlerAuth) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	user, err := h.authService.Register(r.Context(), req.Name, req.Email, req.Password, req.Phone)
 	if err != nil {
 		h.logger.Error("failed to register user", zap.Error(err))
-		errors.RespondWithErrorBusiness(w, err.(*domain.BusinessError))
+		errors.RespondWithError(w, err.(*domain.BusinessError))
 		return
 	}
 
@@ -54,7 +55,7 @@ func (h *HandlerAuth) LoginHandler(w http.ResponseWriter, r *http.Request) {
 
 	defer r.Body.Close()
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		errors.RespondWithErrorBusiness(w, domain.ErrInvalidRequestBody)
+		errors.RespondWithError(w, domain.ErrInvalidRequestBody)
 		return
 	}
 
@@ -68,14 +69,14 @@ func (h *HandlerAuth) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	tokenPair, err := h.authService.Login(r.Context(), req.Email, req.Password)
 	if err != nil {
 		h.logger.Debug("failed to login user", zap.Error(err))
-		errors.RespondWithErrorBusiness(w, err.(*domain.BusinessError))
+		errors.RespondWithError(w, err.(*domain.BusinessError))
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(tokenPair); err != nil {
 		h.logger.Error("failed to encode response", zap.Error(err))
-		errors.RespondWithError(w, errors.ErrCodeInternal, "Failed to encode response", nil, http.StatusInternalServerError)
+		errors.RespondWithError(w, domain.ErrInternal)
 		return
 	}
 }
@@ -83,23 +84,36 @@ func (h *HandlerAuth) LoginHandler(w http.ResponseWriter, r *http.Request) {
 func createErrorMessage(w http.ResponseWriter, err error) {
 	var details []errors.ErrorDetail
 	for _, fe := range err.(validator.ValidationErrors) {
+
+		field := pascalToCamel(fe.Field())
+
 		details = append(details, errors.ErrorDetail{
-			Field:   fe.Field(),
+			Field:   field,
 			Message: validationMessage(fe),
 		})
 	}
-	errors.RespondErrorBusinessWithDetails(w, domain.ErrInvalidField, details)
+	errors.RespondErrorWithDetails(w, domain.ErrInvalidField, details)
 }
 
 func validationMessage(fe validator.FieldError) string {
+	field := pascalToCamel(fe.Field())
 	switch fe.Tag() {
 	case "required":
-		return fe.Field() + " is required"
+		return field + " is required"
 	case "email":
 		return "Invalid email format"
 	case "min":
-		return fe.Field() + " must be at least " + fe.Param() + " long"
+		return field + " must be at least " + fe.Param() + " long"
 	default:
-		return fe.Field() + " is invalid"
+		return field + " is invalid"
 	}
+}
+
+// Função para converter PascalCase para camelCase
+func pascalToCamel(str string) string {
+	if len(str) == 0 {
+		return str
+	}
+	// Converte a primeira letra para minúscula
+	return strings.ToLower(string(str[0])) + str[1:]
 }

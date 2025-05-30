@@ -14,13 +14,14 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/hashicorp/vault/api"
 	"github.com/ipede/user-manager-service/internal/domain"
+	"github.com/ipede/user-manager-service/internal/infrastructure/config"
 	"go.uber.org/zap"
 )
 
 // vaultStrategy implements JWTStrategy using HashiCorp Vault
 type vaultStrategy struct {
 	client       *api.Client
-	config       *domain.VaultConfig
+	config       *config.Config
 	logger       *zap.Logger
 	keyID        string
 	lastRotation time.Time
@@ -28,14 +29,14 @@ type vaultStrategy struct {
 }
 
 // NewVaultStrategy creates a new Vault strategy for JWT signing
-func NewVaultStrategy(config *domain.VaultConfig, logger *zap.Logger) (domain.JWTStrategy, error) {
+func NewVaultStrategy(config *config.Config, logger *zap.Logger) (domain.JWTStrategy, error) {
 	if config == nil {
 		return nil, domain.ErrInvalidKeyConfig
 	}
 
 	// Create Vault client
 	vaultConfig := api.DefaultConfig()
-	vaultConfig.Address = config.Address
+	vaultConfig.Address = config.VaultAddress
 
 	client, err := api.NewClient(vaultConfig)
 	if err != nil {
@@ -43,7 +44,7 @@ func NewVaultStrategy(config *domain.VaultConfig, logger *zap.Logger) (domain.JW
 	}
 
 	// Set token
-	client.SetToken(config.Token)
+	client.SetToken(config.VaultToken)
 
 	// Create strategy
 	strategy := &vaultStrategy{
@@ -73,7 +74,7 @@ func (v *vaultStrategy) Sign(claims *domain.Claims) (string, error) {
 	defer v.mu.RUnlock()
 
 	if v.client == nil {
-		return "", domain.NewJWTError("sign token", domain.ErrInvalidClient)
+		return "", domain.ErrInvalidClient
 	}
 
 	// Cria o token sem assinatura
@@ -83,7 +84,7 @@ func (v *vaultStrategy) Sign(claims *domain.Claims) (string, error) {
 	unsignedToken, err := token.SigningString()
 	if err != nil {
 		v.logger.Error("failed to get signing string", zap.Error(err))
-		return "", domain.NewJWTError("sign token", domain.ErrTokenGeneration)
+		return "", domain.ErrTokenGeneration
 	}
 
 	// Solicita assinatura ao Vault
@@ -104,33 +105,33 @@ func (v *vaultStrategy) Sign(claims *domain.Claims) (string, error) {
 
 // signWithVault solicita assinatura ao Vault
 func (v *vaultStrategy) signWithVault(input string) (string, error) {
-	signPath := fmt.Sprintf("%s/sign/%s", v.config.MountPath, v.config.KeyName)
+	signPath := fmt.Sprintf("%s/sign/%s", v.config.VaultMountPath, v.config.VaultKeyName)
 	payload := v.getVaultPayload(base64.StdEncoding.EncodeToString([]byte(input)))
 
 	secret, err := v.client.Logical().Write(signPath, payload)
 	if err != nil {
 		v.logger.Error("failed to sign token with vault", zap.Error(err))
-		return "", domain.NewJWTError("sign token", domain.ErrTokenGeneration)
+		return "", domain.ErrTokenGeneration
 	}
 
 	signature, ok := secret.Data["signature"].(string)
 	if !ok {
 		v.logger.Error("missing or invalid signature format from Vault")
-		return "", domain.NewJWTError("sign token", domain.ErrInvalidSignature)
+		return "", domain.ErrInvalidSignature
 	}
 
 	// Extrai versão da assinatura no formato "vault:vX:<signature>"
 	parts := strings.SplitN(signature, ":", 3)
 	if len(parts) != 3 || parts[0] != "vault" {
 		v.logger.Error("unexpected signature format", zap.String("raw_signature", signature))
-		return "", domain.NewJWTError("sign token", domain.ErrInvalidSignature)
+		return "", domain.ErrInvalidSignature
 	}
 
 	// Decodifica a assinatura do Vault
 	decodedSig, err := base64.StdEncoding.DecodeString(parts[2])
 	if err != nil {
 		v.logger.Error("failed to decode base64 signature", zap.Error(err))
-		return "", domain.NewJWTError("sign token", domain.ErrInvalidSignature)
+		return "", domain.ErrInvalidSignature
 	}
 
 	// Converte para base64url sem padding
@@ -213,7 +214,7 @@ func (v *vaultStrategy) GetPublicKey() *rsa.PublicKey {
 	}
 
 	// Get public key from Vault
-	path := fmt.Sprintf("%s/keys/%s", v.config.MountPath, v.config.KeyName)
+	path := fmt.Sprintf("%s/keys/%s", v.config.VaultMountPath, v.config.VaultKeyName)
 	secret, err := v.client.Logical().Read(path)
 	if err != nil {
 		v.logger.Error("failed to get public key from vault", zap.Error(err))
@@ -242,7 +243,7 @@ func (v *vaultStrategy) GetPublicKey() *rsa.PublicKey {
 
 	publicKeyPEM, ok := keyInfo["public_key"].(string)
 	if !ok {
-		v.logger.Error("invalid public key from vault", zap.String("key_name", v.config.KeyName), zap.Any("key_info", keyInfo))
+		v.logger.Error("invalid public key from vault", zap.String("key_name", v.config.VaultKeyName), zap.Any("key_info", keyInfo))
 		return nil
 	}
 
@@ -281,15 +282,15 @@ func (v *vaultStrategy) RotateKey() error {
 	defer v.mu.Unlock()
 
 	if v.client == nil {
-		return domain.NewJWTError("rotate key", domain.ErrInvalidClient)
+		return domain.ErrInvalidClient
 	}
 
 	// Get current key version from Vault
-	path := fmt.Sprintf("%s/keys/%s", v.config.MountPath, v.config.KeyName)
+	path := fmt.Sprintf("%s/keys/%s", v.config.VaultMountPath, v.config.VaultKeyName)
 	secret, err := v.client.Logical().Read(path)
 	if err != nil {
 		v.logger.Error("failed to get key info from vault", zap.Error(err))
-		return domain.NewJWTError("rotate key", domain.ErrInvalidKeyConfig)
+		return domain.ErrInvalidKeyConfig
 	}
 
 	latestVersion, ok := secret.Data["latest_version"].(json.Number)
@@ -307,11 +308,11 @@ func (v *vaultStrategy) RotateKey() error {
 	// Only rotate if we don't have a key ID or if it's been more than 24 hours
 	if v.keyID == "" || time.Since(v.lastRotation) > 24*time.Hour {
 		// Rotate key in Vault
-		rotatePath := fmt.Sprintf("%s/keys/%s/rotate", v.config.MountPath, v.config.KeyName)
+		rotatePath := fmt.Sprintf("%s/keys/%s/rotate", v.config.VaultMountPath, v.config.VaultKeyName)
 		_, err := v.client.Logical().Write(rotatePath, nil)
 		if err != nil {
 			v.logger.Error("failed to rotate key in vault", zap.Error(err))
-			return domain.NewJWTError("rotate key", domain.ErrInvalidKeyConfig)
+			return domain.ErrInvalidKeyConfig
 		}
 
 		// Update key ID and rotation time
@@ -329,27 +330,11 @@ func (v *vaultStrategy) GetLastRotation() time.Time {
 	return v.lastRotation
 }
 
-// GetAccessDuration returns the access token duration
-func (v *vaultStrategy) GetAccessDuration() time.Duration {
-	if v.config != nil && v.config.AccessDuration > 0 {
-		return v.config.AccessDuration
-	}
-	return domain.DefaultAccessTokenDuration
-}
-
-// GetRefreshDuration returns the refresh token duration
-func (v *vaultStrategy) GetRefreshDuration() time.Duration {
-	if v.config != nil && v.config.RefreshDuration > 0 {
-		return v.config.RefreshDuration
-	}
-	return domain.DefaultRefreshTokenDuration
-}
-
 func (v *vaultStrategy) loadCurrentKeyID() error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
-	path := fmt.Sprintf("%s/keys/%s", v.config.MountPath, v.config.KeyName)
+	path := fmt.Sprintf("%s/keys/%s", v.config.VaultMountPath, v.config.VaultKeyName)
 	secret, err := v.client.Logical().Read(path)
 	if err != nil {
 		v.logger.Error("failed to read key metadata from vault", zap.Error(err))
@@ -452,7 +437,7 @@ func (v *vaultStrategy) Verify(tokenString string) (*domain.Claims, error) {
 		zap.String("kid", header["kid"].(string)))
 
 	// Verifica a assinatura
-	path := fmt.Sprintf("%s/verify/%s", v.config.MountPath, v.config.KeyName)
+	path := fmt.Sprintf("%s/verify/%s", v.config.VaultMountPath, v.config.VaultKeyName)
 	data := v.getVaultPayload(base64.StdEncoding.EncodeToString([]byte(parts[0] + "." + parts[1])))
 	data["signature"] = header["kid"].(string) + ":" + encodedSignature
 

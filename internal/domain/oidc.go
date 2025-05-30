@@ -2,11 +2,6 @@ package domain
 
 import (
 	"context"
-	"errors"
-)
-
-var (
-	ErrInvalidPKCE = errors.New("invalid PKCE")
 )
 
 // OIDCService defines the interface for OpenID Connect operations

@@ -9,6 +9,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/ipede/user-manager-service/internal/domain"
+	"github.com/ipede/user-manager-service/internal/infrastructure/config"
 	"github.com/oklog/ulid/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -38,14 +39,6 @@ func (m *mockVaultStrategy) GetLastRotation() time.Time {
 	return time.Now()
 }
 
-func (m *mockVaultStrategy) GetAccessDuration() time.Duration {
-	return domain.DefaultAccessTokenDuration
-}
-
-func (m *mockVaultStrategy) GetRefreshDuration() time.Duration {
-	return domain.DefaultRefreshTokenDuration
-}
-
 func TestLocalStrategy(t *testing.T) {
 	// Create temporary directory for test keys
 	tempDir, err := os.MkdirTemp("", "jwt-test-*")
@@ -57,10 +50,9 @@ func TestLocalStrategy(t *testing.T) {
 	logger, err := zap.NewDevelopment()
 	require.NoError(t, err)
 
-	config := &domain.LocalConfig{
-		KeyPath:         filepath.Join(tempDir, "test-key"),
-		AccessDuration:  domain.DefaultAccessTokenDuration,
-		RefreshDuration: domain.DefaultRefreshTokenDuration,
+	config := &config.Config{
+		JWTKeyPath: filepath.Join(tempDir, "test-key"),
+		RSAKeySize: 2048,
 	}
 
 	t.Run("new strategy", func(t *testing.T) {
@@ -118,13 +110,5 @@ func TestLocalStrategy(t *testing.T) {
 
 		// Check key ID changed
 		assert.NotEqual(t, initialKeyID, strategy.GetKeyID())
-	})
-
-	t.Run("token durations", func(t *testing.T) {
-		strategy, err := NewLocalStrategy(config, logger)
-		require.NoError(t, err)
-
-		assert.Equal(t, domain.DefaultAccessTokenDuration, strategy.GetAccessDuration())
-		assert.Equal(t, domain.DefaultRefreshTokenDuration, strategy.GetRefreshDuration())
 	})
 }

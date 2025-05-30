@@ -2,11 +2,11 @@ package handlers
 
 // TokenRequest represents the token request structure
 type TokenRequest struct {
-	GrantType    string `json:"grant_type"`
+	GrantType    string `json:"grantType" validate:"required"`
 	Code         string `json:"code"`
-	RefreshToken string `json:"refresh_token"`
-	ClientID     string `json:"client_id"`
-	ClientSecret string `json:"client_secret"`
-	RedirectURI  string `json:"redirect_uri"`
-	CodeVerifier string `json:"code_verifier"`
+	RefreshToken string `json:"refreshToken"`
+	ClientID     string `json:"clientId" validate:"required"`
+	ClientSecret string `json:"clientSecret" validate:"required"`
+	RedirectURI  string `json:"redirectUri"`
+	CodeVerifier string `json:"codeVerifier"`
 }

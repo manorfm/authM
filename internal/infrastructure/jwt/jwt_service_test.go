@@ -37,17 +37,18 @@ func getJWTServiceWithDuration(t *testing.T, accessDuration, refreshDuration tim
 		VaultToken:     "",
 		VaultMountPath: "",
 		VaultKeyName:   "",
+		RSAKeySize:     2048,
 	}
 
 	strategy := NewCompositeStrategy(cfg, logger)
-	service := NewJWTService(strategy, logger)
+	service := NewJWTService(strategy, cfg, logger)
 	require.NotNil(t, service)
 
 	return service
 }
 
 func getJWTService(t *testing.T) domain.JWTService {
-	return getJWTServiceWithDuration(t, domain.DefaultAccessTokenDuration, domain.DefaultRefreshTokenDuration)
+	return getJWTServiceWithDuration(t, time.Duration(15*time.Minute), time.Duration(24*time.Hour))
 }
 
 func TestJWTService_ValidateToken(t *testing.T) {
@@ -66,7 +67,7 @@ func TestJWTService_ValidateToken(t *testing.T) {
 	require.Equal(t, roles, claims.Roles)
 
 	// Test expired token
-	shortService := getJWTServiceWithDuration(t, 1*time.Second, domain.DefaultRefreshTokenDuration)
+	shortService := getJWTServiceWithDuration(t, 1*time.Second, time.Duration(24*time.Hour))
 	expiredUserID := ulid.Make()
 	expiredRoles := []string{"USER"}
 	expiredTokenPair, err := shortService.GenerateTokenPair(expiredUserID, expiredRoles)
@@ -101,7 +102,7 @@ func TestJWTService_ValidateToken(t *testing.T) {
 	// Try to validate blacklisted token
 	_, err = service.ValidateToken(blacklistedTokenPair.AccessToken)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "token is blacklisted")
+	require.Contains(t, err.Error(), domain.ErrTokenBlacklisted.GetMessage())
 }
 
 func TestJWTService_GenerateTokenPair(t *testing.T) {

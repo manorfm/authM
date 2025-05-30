@@ -77,11 +77,11 @@ func TestAuthHandler_Register(t *testing.T) {
 				"phone":    "1234567890",
 			},
 			mockSetup: func(m *mockAuthService) {
-				m.On("Register", mock.Anything, "John Doe", "john@example.com", "password123", "1234567890").Return(nil, domain.ErrUserAlreadyExists)
+				m.On("Register", mock.Anything, "John Doe", "john@example.com", "password123", "1234567890").Return(nil, domain.ErrAlreadyExists("User"))
 			},
 			expectedStatus: http.StatusBadRequest,
 			expectedBody: errors.ErrorResponse{
-				Code:    "U0007",
+				Code:    "U0009",
 				Message: "User already exists",
 			},
 		},
@@ -97,16 +97,16 @@ func TestAuthHandler_Register(t *testing.T) {
 			},
 			expectedStatus: http.StatusBadRequest,
 			expectedBody: errors.ErrorResponse{
-				Code:    "U0009",
+				Code:    "U0011",
 				Message: "Invalid field",
 				Details: []errors.ErrorDetail{
 					{
-						Field:   "Email",
-						Message: "Email is required",
+						Field:   "email",
+						Message: "email is required",
 					},
 					{
-						Field:   "Password",
-						Message: "Password is required",
+						Field:   "password",
+						Message: "password is required",
 					},
 				},
 			},
@@ -119,7 +119,7 @@ func TestAuthHandler_Register(t *testing.T) {
 			},
 			expectedStatus: http.StatusBadRequest,
 			expectedBody: errors.ErrorResponse{
-				Code:    "U0010",
+				Code:    "U0013",
 				Message: "Invalid request body",
 			},
 		},
@@ -232,12 +232,12 @@ func TestAuthHandler_Login(t *testing.T) {
 			},
 			expectedStatus: http.StatusBadRequest,
 			expectedBody: errors.ErrorResponse{
-				Code:    "U0009",
+				Code:    "U0011",
 				Message: "Invalid field",
 				Details: []errors.ErrorDetail{
 					{
-						Field:   "Password",
-						Message: "Password is required",
+						Field:   "password",
+						Message: "password is required",
 					},
 				},
 			},
@@ -250,7 +250,7 @@ func TestAuthHandler_Login(t *testing.T) {
 			},
 			expectedStatus: http.StatusBadRequest,
 			expectedBody: errors.ErrorResponse{
-				Code:    "U0010",
+				Code:    "U0013",
 				Message: "Invalid request body",
 			},
 		},

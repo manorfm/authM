@@ -24,40 +24,15 @@ type compositeStrategy struct {
 // NewCompositeStrategy creates a new composite strategy with fallback support
 func NewCompositeStrategy(cfg *config.Config, logger *zap.Logger) domain.JWTStrategy {
 	// Create JWT configuration
-	jwtConfig := &domain.JWTConfig{
-		AccessDuration:  cfg.JWTAccessDuration,
-		RefreshDuration: cfg.JWTRefreshDuration,
-	}
 
-	// Validate JWT configuration
-	if err := jwtConfig.Validate(); err != nil {
-		logger.Fatal("Invalid JWT configuration", zap.Error(err))
-	}
-
-	// Create Vault strategy
-	vaultConfig := &domain.VaultConfig{
-		Address:         cfg.VaultAddress,
-		Token:           cfg.VaultToken,
-		MountPath:       cfg.VaultMountPath,
-		KeyName:         cfg.VaultKeyName,
-		AccessDuration:  cfg.JWTAccessDuration,
-		RefreshDuration: cfg.JWTRefreshDuration,
-	}
-
-	vaultStrategy, err := NewVaultStrategy(vaultConfig, logger)
+	vaultStrategy, err := NewVaultStrategy(cfg, logger)
 	if err != nil {
 		logger.Warn("Failed to create Vault strategy, falling back to local strategy",
 			zap.Error(err))
 	}
 
 	// Create local strategy
-	localConfig := &domain.LocalConfig{
-		KeyPath:         cfg.JWTKeyPath,
-		AccessDuration:  cfg.JWTAccessDuration,
-		RefreshDuration: cfg.JWTRefreshDuration,
-	}
-
-	localStrategy, err := NewLocalStrategy(localConfig, logger)
+	localStrategy, err := NewLocalStrategy(cfg, logger)
 	if err != nil {
 		logger.Fatal("Failed to create local strategy", zap.Error(err))
 	}
@@ -176,30 +151,6 @@ func (c *compositeStrategy) TryVault() error {
 	c.useVault = true
 	c.logger.Info("Successfully switched back to Vault strategy")
 	return nil
-}
-
-// GetAccessDuration returns the access token duration
-func (c *compositeStrategy) GetAccessDuration() time.Duration {
-	c.mu.RLock()
-	useVault := c.useVault && c.vaultStrategy != nil
-	c.mu.RUnlock()
-
-	if useVault {
-		return c.vaultStrategy.GetAccessDuration()
-	}
-	return c.localStrategy.GetAccessDuration()
-}
-
-// GetRefreshDuration returns the refresh token duration
-func (c *compositeStrategy) GetRefreshDuration() time.Duration {
-	c.mu.RLock()
-	useVault := c.useVault && c.vaultStrategy != nil
-	c.mu.RUnlock()
-
-	if useVault {
-		return c.vaultStrategy.GetRefreshDuration()
-	}
-	return c.localStrategy.GetRefreshDuration()
 }
 
 // Verify verifies a JWT token using the current strategy with fallback

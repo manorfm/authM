@@ -29,7 +29,7 @@ func NewRouter(
 ) *Router {
 
 	strategy := jwt.NewCompositeStrategy(cfg, logger)
-	jwtService := jwt.NewJWTService(strategy, logger)
+	jwtService := jwt.NewJWTService(strategy, cfg, logger)
 	authMiddleware := auth.NewAuthMiddleware(jwtService, logger)
 	userRepo := repository.NewUserRepository(db, logger)
 	oauthRepo := repository.NewOAuth2Repository(db, logger)
@@ -41,6 +41,7 @@ func NewRouter(
 	authHandler := handlers.NewAuthHandler(authService, logger)
 	userHandler := handlers.NewUserHandler(userService, logger)
 	oidcHandler := handlers.NewOIDCHandler(oidcService, jwtService, logger)
+	oauth2Handler := handlers.NewOAuth2Handler(oauthRepo, logger)
 
 	// Swagger documentation
 	router := createRouter()
@@ -75,6 +76,7 @@ func NewRouter(
 	router.Group(func(r chi.Router) {
 		r.Use(authMiddleware.Authenticator, authMiddleware.RequireRole("admin"))
 		r.Get("/users", userHandler.ListUsersHandler)
+		r.Get("/oauth2/clients", oauth2Handler.ListClientsHandler)
 	})
 
 	// Protected routes
@@ -87,9 +89,8 @@ func NewRouter(
 		r.Get("/oauth2/userinfo", oidcHandler.GetUserInfoHandler)
 
 		// OAuth2 client management routes
-		oauth2Handler := handlers.NewOAuth2Handler(oauthRepo, logger)
+
 		r.Post("/oauth2/clients", oauth2Handler.CreateClientHandler)
-		r.Get("/oauth2/clients", oauth2Handler.ListClientsHandler)
 		r.Get("/oauth2/clients/{id}", oauth2Handler.GetClientHandler)
 		r.Put("/oauth2/clients/{id}", oauth2Handler.UpdateClientHandler)
 		r.Delete("/oauth2/clients/{id}", oauth2Handler.DeleteClientHandler)

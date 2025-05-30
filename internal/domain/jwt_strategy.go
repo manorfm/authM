@@ -19,25 +19,4 @@ type JWTStrategy interface {
 	RotateKey() error
 	// GetLastRotation returns the last key rotation time
 	GetLastRotation() time.Time
-	// GetAccessDuration returns the access token duration
-	GetAccessDuration() time.Duration
-	// GetRefreshDuration returns the refresh token duration
-	GetRefreshDuration() time.Duration
-}
-
-// VaultConfig holds the configuration for Vault integration
-type VaultConfig struct {
-	Address         string
-	Token           string
-	MountPath       string
-	KeyName         string
-	AccessDuration  time.Duration
-	RefreshDuration time.Duration
-}
-
-// LocalConfig holds the configuration for local key storage
-type LocalConfig struct {
-	KeyPath         string
-	AccessDuration  time.Duration
-	RefreshDuration time.Duration
 }

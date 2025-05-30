@@ -124,7 +124,7 @@ func TestCreateClientHandler(t *testing.T) {
 					UpdatedAt:    time.Now(),
 				}, nil)
 			},
-			expectedStatus: http.StatusConflict,
+			expectedStatus: http.StatusBadRequest,
 			expectedError:  true,
 		},
 		{
@@ -289,7 +289,7 @@ func TestDeleteClientHandler(t *testing.T) {
 			name:     "Client Not Found",
 			clientID: "non-existent",
 			mockSetup: func(m *MockOAuth2Repository) {
-				m.On("FindClientByID", mock.Anything, "non-existent").Return(nil, domain.ErrInvalidClient)
+				m.On("FindClientByID", mock.Anything, "non-existent").Return(nil, domain.ErrClientNotFound)
 			},
 			expectedStatus: http.StatusNotFound,
 			expectedError:  true,

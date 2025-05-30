@@ -91,7 +91,7 @@ func TestAuthMiddleware_Authenticator(t *testing.T) {
 				// No setup needed
 			},
 			expectedStatus: http.StatusUnauthorized,
-			expectedBody:   `{"code":"ERR_002","message":"Unauthorized"}`,
+			expectedBody:   `{"code":"U0014","message":"Unauthorized"}`,
 		},
 		{
 			name:  "invalid token",
@@ -99,8 +99,8 @@ func TestAuthMiddleware_Authenticator(t *testing.T) {
 			mockSetup: func(m *MockJWT) {
 				m.On("ValidateToken", "invalid-token").Return(nil, assert.AnError)
 			},
-			expectedStatus: http.StatusUnauthorized,
-			expectedBody:   `{"code":"ERR_002","message":"Invalid token"}`,
+			expectedStatus: http.StatusForbidden,
+			expectedBody:   `{"code":"U0018","message":"Forbidden"}`,
 		},
 		{
 			name:  "valid token",
@@ -159,14 +159,14 @@ func TestAuthMiddleware_RequireRole(t *testing.T) {
 			requiredRole:   "admin",
 			userRoles:      nil,
 			expectedStatus: http.StatusForbidden,
-			expectedBody:   `{"code":"ERR_001","message":"Forbidden"}`,
+			expectedBody:   `{"code":"U0018","message":"Forbidden"}`,
 		},
 		{
 			name:           "role not found",
 			requiredRole:   "admin",
 			userRoles:      []string{"user"},
 			expectedStatus: http.StatusForbidden,
-			expectedBody:   `{"code":"ERR_001","message":"Forbidden"}`,
+			expectedBody:   `{"code":"U0018","message":"Forbidden"}`,
 		},
 		{
 			name:           "role found",

@@ -37,7 +37,8 @@ func (r *PostgresOAuth2Repository) FindClientByID(ctx context.Context, id string
 		FROM oauth2_clients WHERE id = $1
 	`, id).Scan(&client.ID, &client.Secret, &client.RedirectURIs, &client.GrantTypes, &client.Scopes, &client.CreatedAt, &client.UpdatedAt)
 	if err != nil {
-		return nil, err
+		r.logger.Error("failed to find client by id", zap.Error(err))
+		return nil, domain.ErrClientNotFound
 	}
 
 	return client, nil

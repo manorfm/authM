@@ -93,9 +93,12 @@ func TestAuthService_Register(t *testing.T) {
 			VaultMountPath:     "transit",
 			VaultKeyName:       "test-key",
 			ServerPort:         8080,
+			RSAKeySize:         2048,
+			JWKSCacheDuration:  1 * time.Hour,
 		}
+
 		strategy := jwt.NewCompositeStrategy(cfg, logger)
-		jwtService := jwt.NewJWTService(strategy, logger)
+		jwtService := jwt.NewJWTService(strategy, cfg, logger)
 		service := NewAuthService(repo, jwtService, logger)
 
 		repo.On("ExistsByEmail", ctx, "test@example.com").Return(false, nil)
@@ -131,7 +134,7 @@ func TestAuthService_Register(t *testing.T) {
 			ServerPort:         8080,
 		}
 		strategy := jwt.NewCompositeStrategy(cfg, logger)
-		jwtService := jwt.NewJWTService(strategy, logger)
+		jwtService := jwt.NewJWTService(strategy, cfg, logger)
 		service := NewAuthService(repo, jwtService, logger)
 
 		repo.On("ExistsByEmail", ctx, "test@example.com").Return(true, nil)
@@ -160,7 +163,7 @@ func TestAuthService_Register(t *testing.T) {
 			ServerPort:         8080,
 		}
 		strategy := jwt.NewCompositeStrategy(cfg, logger)
-		jwtService := jwt.NewJWTService(strategy, logger)
+		jwtService := jwt.NewJWTService(strategy, cfg, logger)
 		service := NewAuthService(repo, jwtService, logger)
 
 		repo.On("ExistsByEmail", ctx, "test@example.com").Return(false, assert.AnError)
@@ -187,9 +190,11 @@ func TestAuthService_Register(t *testing.T) {
 			VaultMountPath:     "transit",
 			VaultKeyName:       "test-key",
 			ServerPort:         8080,
+			RSAKeySize:         2048,
+			JWKSCacheDuration:  1 * time.Hour,
 		}
 		strategy := jwt.NewCompositeStrategy(cfg, logger)
-		jwtService := jwt.NewJWTService(strategy, logger)
+		jwtService := jwt.NewJWTService(strategy, cfg, logger)
 		service := NewAuthService(repo, jwtService, logger)
 
 		repo.On("ExistsByEmail", ctx, "test@example.com").Return(false, nil)
@@ -199,7 +204,7 @@ func TestAuthService_Register(t *testing.T) {
 		assert.Error(t, err)
 		assert.IsType(t, &domain.InfraError{}, err)
 		infraErr := err.(*domain.InfraError)
-		assert.Equal(t, "U0011", infraErr.Code)
+		assert.Equal(t, "U0015", infraErr.Code)
 		assert.Equal(t, "Internal server error", infraErr.Message)
 		assert.Nil(t, user)
 	})
@@ -277,7 +282,7 @@ func TestAuthService_Login(t *testing.T) {
 				ServerPort:         8080,
 			}
 			strategy := jwt.NewCompositeStrategy(cfg, zap.NewNop())
-			jwtService := jwt.NewJWTService(strategy, zap.NewNop())
+			jwtService := jwt.NewJWTService(strategy, cfg, zap.NewNop())
 			service := NewAuthService(repo, jwtService, zap.NewNop())
 
 			tt.mockSetup(repo)
