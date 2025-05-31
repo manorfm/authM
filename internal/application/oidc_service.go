@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ipede/user-manager-service/internal/domain"
+	"github.com/ipede/user-manager-service/internal/infrastructure/config"
 	"github.com/oklog/ulid/v2"
 	"go.uber.org/zap"
 )
@@ -19,6 +20,7 @@ type OIDCService struct {
 	userRepo    domain.UserRepository
 	oauthRepo   domain.OAuth2Repository
 	logger      *zap.Logger
+	config      *config.Config
 }
 
 func NewOIDCService(
@@ -26,6 +28,7 @@ func NewOIDCService(
 	jwtService domain.JWTService,
 	userRepo domain.UserRepository,
 	oauthRepo domain.OAuth2Repository,
+	config *config.Config,
 	logger *zap.Logger,
 ) *OIDCService {
 	return &OIDCService{
@@ -33,6 +36,7 @@ func NewOIDCService(
 		jwtService:  jwtService,
 		userRepo:    userRepo,
 		oauthRepo:   oauthRepo,
+		config:      config,
 		logger:      logger,
 	}
 }
@@ -72,11 +76,11 @@ func (s *OIDCService) GetOpenIDConfiguration(ctx context.Context) (map[string]in
 	}
 
 	return map[string]interface{}{
-		"issuer":                                "http://localhost:8080",
-		"authorization_endpoint":                "http://localhost:8080/oauth2/authorize",
-		"token_endpoint":                        "http://localhost:8080/oauth2/token",
-		"userinfo_endpoint":                     "http://localhost:8080/oauth2/userinfo",
-		"jwks_uri":                              "http://localhost:8080/.well-known/jwks.json",
+		"issuer":                                s.config.ServerURL,
+		"authorization_endpoint":                s.config.ServerURL + "/oauth2/authorize",
+		"token_endpoint":                        s.config.ServerURL + "/oauth2/token",
+		"userinfo_endpoint":                     s.config.ServerURL + "/oauth2/userinfo",
+		"jwks_uri":                              s.config.ServerURL + "/.well-known/jwks.json",
 		"response_types_supported":              []string{"code", "token", "id_token"},
 		"subject_types_supported":               []string{"public"},
 		"id_token_signing_alg_values_supported": []string{"RS256"},
@@ -98,8 +102,6 @@ func (s *OIDCService) ExchangeCode(ctx context.Context, code string, codeVerifie
 		}
 	}
 
-	defer removeAuthorizationCode()
-
 	// Get authorization code from repository
 	authCode, err := s.oauthRepo.GetAuthorizationCode(ctx, code)
 	if err != nil {
@@ -111,6 +113,7 @@ func (s *OIDCService) ExchangeCode(ctx context.Context, code string, codeVerifie
 	if authCode.ExpiresAt.Before(time.Now()) {
 		s.logger.Error("Authorization code expired",
 			zap.Time("expires_at", authCode.ExpiresAt))
+		removeAuthorizationCode()
 		return nil, domain.ErrAuthorizationCodeExpired
 	}
 
@@ -171,6 +174,7 @@ func (s *OIDCService) ExchangeCode(ctx context.Context, code string, codeVerifie
 		return nil, err
 	}
 
+	removeAuthorizationCode()
 	// Convert infrastructure token pair to domain token pair
 	tokenPair := &domain.TokenPair{
 		AccessToken:  infraTokenPair.AccessToken,

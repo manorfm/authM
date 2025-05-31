@@ -35,7 +35,7 @@ func NewRouter(
 	oauthRepo := repository.NewOAuth2Repository(db, logger)
 	userService := application.NewUserService(userRepo, logger)
 	authService := application.NewAuthService(userRepo, jwtService, logger)
-	oidcService := application.NewOIDCService(authService, jwtService, userRepo, oauthRepo, logger)
+	oidcService := application.NewOIDCService(authService, jwtService, userRepo, oauthRepo, cfg, logger)
 
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(authService, logger)

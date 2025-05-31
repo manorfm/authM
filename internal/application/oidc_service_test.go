@@ -9,6 +9,7 @@ import (
 
 	jwtv5 "github.com/golang-jwt/jwt/v5"
 	"github.com/ipede/user-manager-service/internal/domain"
+	"github.com/ipede/user-manager-service/internal/infrastructure/config"
 	"github.com/oklog/ulid/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -334,7 +335,7 @@ func TestOIDCService_GetUserInfo(t *testing.T) {
 			mockUserRepo := new(mockUserRepository)
 			tt.mockSetup(mockUserRepo)
 
-			service := NewOIDCService(nil, nil, mockUserRepo, nil, zap.NewNop())
+			service := NewOIDCService(nil, nil, mockUserRepo, nil, config.NewConfig(), zap.NewNop())
 
 			info, err := service.GetUserInfo(context.Background(), tt.userID.String())
 
@@ -411,7 +412,7 @@ func TestOIDCService_Authorize(t *testing.T) {
 			mockOAuth2Repo := new(mockOAuth2Repository)
 			tt.mockSetup(mockOAuth2Repo)
 
-			service := NewOIDCService(nil, nil, nil, mockOAuth2Repo, zap.NewNop())
+			service := NewOIDCService(nil, nil, nil, mockOAuth2Repo, config.NewConfig(), zap.NewNop())
 			ctx := context.Background()
 			ctx = context.WithValue(ctx, "sub", "01ARZ3NDEKTSV4RRFFQ69G5FAV")
 			ctx = context.WithValue(ctx, "code_challenge", "challenge123")
@@ -469,7 +470,6 @@ func TestOIDCService_ExchangeCode(t *testing.T) {
 			codeVerifier: "verifier",
 			mockSetup: func(m *mockOAuth2Repository) {
 				m.On("GetAuthorizationCode", mock.Anything, "invalid_code").Return(nil, domain.ErrInvalidAuthorizationCode)
-				m.On("DeleteAuthorizationCode", mock.Anything, "invalid_code").Return(nil)
 			},
 			expectedError: domain.ErrInvalidAuthorizationCode,
 		},
@@ -491,7 +491,7 @@ func TestOIDCService_ExchangeCode(t *testing.T) {
 				}, nil)
 			}
 
-			service := NewOIDCService(nil, mockJWT, mockUserRepo, mockOAuth2Repo, logger)
+			service := NewOIDCService(nil, mockJWT, mockUserRepo, mockOAuth2Repo, config.NewConfig(), logger)
 
 			token, err := service.ExchangeCode(context.Background(), tt.code, tt.codeVerifier)
 
@@ -554,7 +554,7 @@ func TestOIDCService_GetOpenIDConfiguration(t *testing.T) {
 				tt.mockSetup(oauth2Repo.(*mockOAuth2Repository))
 			}
 
-			service := NewOIDCService(nil, nil, nil, oauth2Repo, zap.NewNop())
+			service := NewOIDCService(nil, nil, nil, oauth2Repo, config.NewConfig(), zap.NewNop())
 
 			config, err := service.GetOpenIDConfiguration(context.Background())
 
@@ -667,7 +667,7 @@ func TestOIDCService_RefreshToken(t *testing.T) {
 			}
 			tt.mockSetup(mockUserRepo, jwtService)
 
-			service := NewOIDCService(nil, jwtService, mockUserRepo, nil, logger)
+			service := NewOIDCService(nil, jwtService, mockUserRepo, nil, config.NewConfig(), logger)
 
 			token, err := service.RefreshToken(context.Background(), tt.refreshToken)
 

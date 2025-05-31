@@ -36,6 +36,9 @@ type Config struct {
 
 	// JWKS cache duration
 	JWKSCacheDuration time.Duration
+
+	// Server URL
+	ServerURL string
 }
 
 // NewConfig creates a new configuration with default values
@@ -61,6 +64,9 @@ func NewConfig() *Config {
 
 		// Server defaults
 		ServerPort: 8080,
+
+		// Server URL
+		ServerURL: "http://localhost:8080",
 	}
 }
 
@@ -105,6 +111,15 @@ func LoadConfig() (*Config, error) {
 
 		// Server defaults
 		ServerPort: getEnvInt("PORT", 8080),
+
+		// Server URL
+		ServerURL: getEnv("SERVER_URL", "http://localhost:8080"),
+
+		// RSA key size
+		RSAKeySize: getEnvInt("RSA_KEY_SIZE", 2048),
+
+		// JWKS cache duration
+		JWKSCacheDuration: getEnvDuration("JWKS_CACHE_DURATION", 1*time.Hour),
 	}, nil
 }
 
@@ -122,6 +137,16 @@ func getEnvInt(key string, defaultValue int) int {
 		intValue, err := strconv.Atoi(value)
 		if err == nil {
 			return intValue
+		}
+	}
+	return defaultValue
+}
+
+func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
+	if value, exists := os.LookupEnv(key); exists {
+		duration, err := time.ParseDuration(value)
+		if err == nil {
+			return duration
 		}
 	}
 	return defaultValue
