@@ -2,11 +2,7 @@ package application
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
 	"strings"
-	"time"
 
 	"github.com/ipede/user-manager-service/internal/domain"
 	"github.com/ipede/user-manager-service/internal/infrastructure/config"
@@ -15,29 +11,20 @@ import (
 )
 
 type OIDCService struct {
-	authService domain.AuthService
-	jwtService  domain.JWTService
-	userRepo    domain.UserRepository
-	oauthRepo   domain.OAuth2Repository
-	logger      *zap.Logger
-	config      *config.Config
+	oauth2Service domain.OAuth2Service
+	jwtService    domain.JWTService
+	userRepo      domain.UserRepository
+	config        *config.Config
+	logger        *zap.Logger
 }
 
-func NewOIDCService(
-	authService domain.AuthService,
-	jwtService domain.JWTService,
-	userRepo domain.UserRepository,
-	oauthRepo domain.OAuth2Repository,
-	config *config.Config,
-	logger *zap.Logger,
-) *OIDCService {
+func NewOIDCService(oauth2Service domain.OAuth2Service, jwtService domain.JWTService, userRepo domain.UserRepository, config *config.Config, logger *zap.Logger) *OIDCService {
 	return &OIDCService{
-		authService: authService,
-		jwtService:  jwtService,
-		userRepo:    userRepo,
-		oauthRepo:   oauthRepo,
-		config:      config,
-		logger:      logger,
+		oauth2Service: oauth2Service,
+		jwtService:    jwtService,
+		userRepo:      userRepo,
+		config:        config,
+		logger:        logger,
 	}
 }
 
@@ -45,20 +32,25 @@ func (s *OIDCService) GetUserInfo(ctx context.Context, userID string) (map[strin
 	s.logger.Debug("Getting user info",
 		zap.String("user_id", userID))
 
+	// Parse user ID
 	id, err := ulid.Parse(userID)
 	if err != nil {
-		s.logger.Error("Failed to parse user ID",
+		s.logger.Error("Invalid user ID",
 			zap.String("user_id", userID),
 			zap.Error(err))
 		return nil, domain.ErrInvalidUserID
 	}
 
+	// Get user from repository
 	user, err := s.userRepo.FindByID(ctx, id)
 	if err != nil {
-		s.logger.Error("Failed to find user", zap.String("user_id", userID), zap.Error(err))
+		s.logger.Error("Failed to find user",
+			zap.String("user_id", userID),
+			zap.Error(err))
 		return nil, domain.ErrUserNotFound
 	}
 
+	// Return user info
 	return map[string]interface{}{
 		"sub":            user.ID.String(),
 		"name":           user.Name,
@@ -70,8 +62,8 @@ func (s *OIDCService) GetUserInfo(ctx context.Context, userID string) (map[strin
 func (s *OIDCService) GetOpenIDConfiguration(ctx context.Context) (map[string]interface{}, error) {
 	s.logger.Debug("Getting OpenID configuration")
 
-	if s.oauthRepo == nil {
-		s.logger.Error("OAuth2 repository is nil")
+	if s.config == nil {
+		s.logger.Error("Configuration is nil")
 		return nil, domain.ErrInternal
 	}
 
@@ -91,95 +83,46 @@ func (s *OIDCService) GetOpenIDConfiguration(ctx context.Context) (map[string]in
 }
 
 func (s *OIDCService) ExchangeCode(ctx context.Context, code string, codeVerifier string) (*domain.TokenPair, error) {
-	s.logger.Debug("Exchanging authorization code for tokens",
-		zap.String("code", code),
-		zap.String("code_verifier", codeVerifier))
-
-	var removeAuthorizationCode = func() {
-		// Delete used authorization code
-		if err := s.oauthRepo.DeleteAuthorizationCode(ctx, code); err != nil {
-			s.logger.Error("Failed to delete authorization code", zap.Error(err))
-		}
-	}
+	s.logger.Debug("Exchanging authorization code",
+		zap.String("code", code))
 
 	// Get authorization code from repository
-	authCode, err := s.oauthRepo.GetAuthorizationCode(ctx, code)
+	client, userID, scopes, err := s.oauth2Service.ValidateAuthorizationCode(ctx, code)
 	if err != nil {
-		s.logger.Error("Failed to get authorization code", zap.Error(err))
-		return nil, domain.ErrInvalidAuthorizationCode
+		return nil, err
 	}
 
-	// Check if code is expired
-	if authCode.ExpiresAt.Before(time.Now()) {
-		s.logger.Error("Authorization code expired",
-			zap.Time("expires_at", authCode.ExpiresAt))
-		removeAuthorizationCode()
-		return nil, domain.ErrAuthorizationCodeExpired
-	}
-
-	// Validate PKCE
-	if authCode.CodeChallenge != "" {
-		if codeVerifier == "" {
-			s.logger.Error("PKCE code verifier is required")
-			return nil, domain.ErrInvalidPKCE
-		}
-
-		// Calculate code challenge from verifier
-		var calculatedChallenge string
-		switch authCode.CodeChallengeMethod {
-		case "S256":
-			// For S256, we need to hash the verifier with SHA-256 and base64url encode it
-			h := sha256.New()
-			h.Write([]byte(codeVerifier))
-			calculatedChallenge = base64.RawURLEncoding.EncodeToString(h.Sum(nil))
-		case "plain":
-			calculatedChallenge = codeVerifier
-		default:
-			s.logger.Error("Unsupported PKCE challenge method",
-				zap.String("method", authCode.CodeChallengeMethod))
-			return nil, domain.ErrInvalidPKCE
-		}
-
-		// Compare calculated challenge with stored challenge
-		if calculatedChallenge != authCode.CodeChallenge {
-			s.logger.Error("PKCE validation failed",
-				zap.String("calculated", calculatedChallenge),
-				zap.String("stored", authCode.CodeChallenge))
-			return nil, domain.ErrInvalidPKCE
-		}
-	}
-
-	// Get user from repository
-	userID, err := ulid.Parse(authCode.UserID)
+	// Parse user ID
+	id, err := ulid.Parse(userID)
 	if err != nil {
-		s.logger.Error("Failed to parse user ID",
-			zap.String("user_id", authCode.UserID),
+		s.logger.Error("Invalid user ID in authorization code",
+			zap.String("user_id", userID),
 			zap.Error(err))
 		return nil, domain.ErrInvalidUserID
 	}
 
-	user, err := s.userRepo.FindByID(ctx, userID)
+	// Get user from repository
+	user, err := s.userRepo.FindByID(ctx, id)
 	if err != nil {
-		s.logger.Error("Failed to get user",
-			zap.String("user_id", authCode.UserID),
+		s.logger.Error("Failed to find user",
+			zap.String("user_id", userID),
 			zap.Error(err))
-		return nil, err
+		return nil, domain.ErrUserNotFound
 	}
 
-	// Generate token pair
-	infraTokenPair, err := s.jwtService.GenerateTokenPair(user.ID, user.Roles)
+	// Generate token pair with scopes
+	tokenPair, err := s.jwtService.GenerateTokenPair(user.ID, user.Roles)
 	if err != nil {
 		s.logger.Error("Failed to generate token pair",
 			zap.Error(err))
-		return nil, err
+		return nil, domain.ErrFailedGenerateToken
 	}
 
-	removeAuthorizationCode()
-	// Convert infrastructure token pair to domain token pair
-	tokenPair := &domain.TokenPair{
-		AccessToken:  infraTokenPair.AccessToken,
-		RefreshToken: infraTokenPair.RefreshToken,
-	}
+	// Log successful exchange
+	s.logger.Info("Successfully exchanged authorization code",
+		zap.String("client_id", client.ID),
+		zap.String("user_id", userID),
+		zap.Strings("scopes", scopes))
 
 	return tokenPair, nil
 }
@@ -195,17 +138,11 @@ func (s *OIDCService) RefreshToken(ctx context.Context, refreshToken string) (*d
 		return nil, domain.ErrInvalidCredentials
 	}
 
-	// claims pode ser nil se o mock retornar nil, garantir isso
-	if claims == nil {
-		s.logger.Error("Claims is nil after token validation")
-		return nil, domain.ErrInvalidCredentials
-	}
-
 	// Parse user ID
-	userID, err := ulid.Parse(claims.Subject)
+	userID, err := ulid.Parse(claims.RegisteredClaims.Subject)
 	if err != nil {
-		s.logger.Error("Failed to parse user ID",
-			zap.String("user_id", claims.Subject),
+		s.logger.Error("Invalid user ID in refresh token",
+			zap.String("user_id", claims.RegisteredClaims.Subject),
 			zap.Error(err))
 		return nil, domain.ErrInvalidUserID
 	}
@@ -213,126 +150,78 @@ func (s *OIDCService) RefreshToken(ctx context.Context, refreshToken string) (*d
 	// Get user from repository
 	user, err := s.userRepo.FindByID(ctx, userID)
 	if err != nil {
-		s.logger.Error("Failed to get user",
-			zap.String("user_id", claims.Subject),
+		s.logger.Error("Failed to find user",
+			zap.String("user_id", claims.RegisteredClaims.Subject),
 			zap.Error(err))
-		return nil, domain.ErrUserNotFound
+		return nil, domain.ErrInvalidCredentials
 	}
 
 	// Generate new token pair
-	infraTokenPair, err := s.jwtService.GenerateTokenPair(user.ID, user.Roles)
+	tokenPair, err := s.jwtService.GenerateTokenPair(user.ID, user.Roles)
 	if err != nil {
 		s.logger.Error("Failed to generate token pair",
 			zap.Error(err))
 		return nil, domain.ErrInternal
 	}
 
-	// Convert infrastructure token pair to domain token pair
-	tokenPair := &domain.TokenPair{
-		AccessToken:  infraTokenPair.AccessToken,
-		RefreshToken: infraTokenPair.RefreshToken,
-	}
-
 	return tokenPair, nil
 }
 
 func (s *OIDCService) Authorize(ctx context.Context, clientID, redirectURI, state, scope string) (string, error) {
-	s.logger.Debug("Authorizing client",
+	s.logger.Debug("Authorizing request",
 		zap.String("client_id", clientID),
-		zap.String("redirect_uri", redirectURI))
+		zap.String("redirect_uri", redirectURI),
+		zap.String("state", state),
+		zap.String("scope", scope))
+
+	// Get user ID from context
+	userID, ok := domain.GetSubject(ctx)
+	if !ok {
+		s.logger.Error("User ID not found in context")
+		return "", domain.ErrUnauthorized
+	}
 
 	// Validate client
-	client, err := s.oauthRepo.FindClientByID(ctx, clientID)
+	client, err := s.oauth2Service.ValidateClient(ctx, clientID, redirectURI)
 	if err != nil {
-		s.logger.Error("Failed to find client",
-			zap.String("client_id", clientID),
-			zap.Error(err))
-		return "", domain.ErrInvalidClient
+		return "", err
 	}
 
-	// Check if redirect URI is allowed
-	validURI := false
-	for _, uri := range client.RedirectURIs {
-		if uri == redirectURI {
-			validURI = true
-			break
+	// Get code challenge from context
+	codeChallenge, _ := domain.GetCodeChallenge(ctx)
+	codeChallengeMethod, _ := domain.GetCodeChallengeMethod(ctx)
+
+	// Parse and validate scopes
+	requestedScopes := strings.Split(scope, " ")
+	if len(requestedScopes) == 0 {
+		s.logger.Error("No scopes provided")
+		return "", domain.ErrInvalidScope
+	}
+
+	// Validate that all requested scopes are allowed for this client
+	validScopes := make([]string, 0)
+	for _, requestedScope := range requestedScopes {
+		valid := false
+		for _, allowedScope := range client.Scopes {
+			if requestedScope == allowedScope {
+				valid = true
+				validScopes = append(validScopes, requestedScope)
+				break
+			}
 		}
-	}
-	if !validURI {
-		s.logger.Error("Invalid redirect URI",
-			zap.String("redirect_uri", redirectURI))
-		return "", domain.ErrInvalidClient
-	}
-
-	// Validate scope (now supports multiple scopes)
-	var requestedScopes []string
-	if scope != "" {
-		requestedScopes = splitAndTrim(scope, " ")
-		for _, reqScope := range requestedScopes {
-			found := false
-			for _, allowedScope := range client.Scopes {
-				if reqScope == allowedScope {
-					found = true
-					break
-				}
-			}
-			if !found {
-				s.logger.Error("Invalid scope",
-					zap.String("scope", reqScope))
-				return "", domain.ErrInvalidScope
-			}
+		if !valid {
+			s.logger.Error("Invalid scope requested",
+				zap.String("scope", requestedScope),
+				zap.Strings("allowed_scopes", client.Scopes))
+			return "", domain.ErrInvalidScope
 		}
 	}
 
-	// Get user ID from context (set by auth middleware)
-	userID, ok := ctx.Value("sub").(string)
-	if !ok || userID == "" {
-		s.logger.Error("Failed to get user ID from context")
-		return "", domain.ErrInvalidCredentials
-	}
-
-	// Get PKCE parameters from context
-	codeChallenge := ctx.Value("code_challenge").(string)
-	codeChallengeMethod := ctx.Value("code_challenge_method").(string)
-
-	// Generate random bytes for the authorization code
-	randomBytes := make([]byte, 32)
-	if _, err := rand.Read(randomBytes); err != nil {
-		s.logger.Error("Failed to generate random bytes for authorization code", zap.Error(err))
-		return "", domain.ErrInternal
-	}
-
-	// Encode random bytes to base64
-	code := base64.RawURLEncoding.EncodeToString(randomBytes)
-
-	authCode := &domain.AuthorizationCode{
-		Code:                code,
-		ClientID:            clientID,
-		UserID:              userID,
-		Scopes:              requestedScopes,
-		ExpiresAt:           time.Now().Add(10 * time.Minute),
-		CreatedAt:           time.Now(),
-		CodeChallenge:       codeChallenge,
-		CodeChallengeMethod: codeChallengeMethod,
-	}
-
-	// Store authorization code
-	if err := s.oauthRepo.CreateAuthorizationCode(ctx, authCode); err != nil {
-		s.logger.Error("Failed to create authorization code", zap.Error(err))
-		return "", domain.ErrInternal
+	// Generate authorization code
+	code, err := s.oauth2Service.GenerateAuthorizationCode(ctx, client.ID, userID, validScopes, codeChallenge, codeChallengeMethod)
+	if err != nil {
+		return "", err
 	}
 
 	return code, nil
-}
-
-// splitAndTrim splits a string by the given separator and trims each element.
-func splitAndTrim(s, sep string) []string {
-	var result []string
-	for _, part := range strings.Split(s, sep) {
-		trimmed := strings.TrimSpace(part)
-		if trimmed != "" {
-			result = append(result, trimmed)
-		}
-	}
-	return result
 }

@@ -127,6 +127,12 @@ var (
 
 	// ErrInvalidRedirectURI is returned when the redirect URI is invalid
 	ErrInvalidRedirectURI = NewBusinessError("U0031", "Invalid redirect URI")
+
+	// ErrInvalidCodeChallengeMethod is returned when the code challenge method is invalid
+	ErrInvalidCodeChallengeMethod = NewBusinessError("U0032", "Invalid code challenge method")
+
+	// ErrInvalidCodeChallenge is returned when the code challenge is invalid
+	ErrInvalidCodeChallenge = NewBusinessError("U0033", "Invalid code challenge")
 )
 
 func (e *BusinessError) GetCode() string {

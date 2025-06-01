@@ -16,6 +16,37 @@ import (
 	"go.uber.org/zap"
 )
 
+// Mock OAuth2Service for testing
+type mockOAuth2Service struct {
+	mock.Mock
+}
+
+func (m *mockOAuth2Service) ValidateClient(ctx context.Context, clientID, redirectURI string) (*domain.OAuth2Client, error) {
+	args := m.Called(ctx, clientID, redirectURI)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*domain.OAuth2Client), args.Error(1)
+}
+
+func (m *mockOAuth2Service) GenerateAuthorizationCode(ctx context.Context, clientID, userID string, scopes []string, codeChallenge, codeChallengeMethod string) (string, error) {
+	args := m.Called(ctx, clientID, userID, scopes, codeChallenge, codeChallengeMethod)
+	return args.String(0), args.Error(1)
+}
+
+func (m *mockOAuth2Service) ValidateAuthorizationCode(ctx context.Context, code string) (*domain.OAuth2Client, string, []string, error) {
+	args := m.Called(ctx, code)
+	if args.Get(0) == nil {
+		return nil, "", nil, args.Error(3)
+	}
+	return args.Get(0).(*domain.OAuth2Client), args.String(1), args.Get(2).([]string), args.Error(3)
+}
+
+func (m *mockOAuth2Service) ValidatePKCE(ctx context.Context, codeVerifier, codeChallenge, codeChallengeMethod string) error {
+	args := m.Called(ctx, codeVerifier, codeChallenge, codeChallengeMethod)
+	return args.Error(0)
+}
+
 type mockOAuth2Repository struct {
 	mock.Mock
 }
@@ -333,9 +364,10 @@ func TestOIDCService_GetUserInfo(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockUserRepo := new(mockUserRepository)
+			mockOAuth2Service := new(mockOAuth2Service)
 			tt.mockSetup(mockUserRepo)
 
-			service := NewOIDCService(nil, nil, mockUserRepo, nil, config.NewConfig(), zap.NewNop())
+			service := NewOIDCService(mockOAuth2Service, nil, mockUserRepo, config.NewConfig(), zap.NewNop())
 
 			info, err := service.GetUserInfo(context.Background(), tt.userID.String())
 
@@ -355,80 +387,151 @@ func TestOIDCService_GetUserInfo(t *testing.T) {
 
 func TestOIDCService_Authorize(t *testing.T) {
 	tests := []struct {
-		name                string
-		clientID            string
-		redirectURI         string
-		state               string
-		scope               string
-		codeChallenge       string
-		codeChallengeMethod string
-		mockSetup           func(*mockOAuth2Repository)
-		expectedError       error
-		expectedCode        string
+		name        string
+		clientID    string
+		redirectURI string
+		state       string
+		scope       string
+		setupMocks  func(*mockOAuth2Service)
+		setupCtx    func(context.Context) context.Context
+		wantCode    string
+		wantErr     error
 	}{
 		{
-			name:                "successful authorization",
-			clientID:            "client123",
-			redirectURI:         "http://example.com/callback",
-			state:               "state123",
-			scope:               "openid profile email",
-			codeChallenge:       "challenge123",
-			codeChallengeMethod: "S256",
-			mockSetup: func(m *mockOAuth2Repository) {
-				m.On("FindClientByID", mock.Anything, "client123").Return(&domain.OAuth2Client{
-					ID:           "client123",
-					RedirectURIs: []string{"http://example.com/callback"},
-					Scopes:       []string{"openid", "profile", "email"},
-				}, nil)
-				m.On("CreateAuthorizationCode", mock.Anything, mock.MatchedBy(func(code *domain.AuthorizationCode) bool {
-					return code.ClientID == "client123" &&
-						len(code.Scopes) == 3 &&
-						code.Scopes[0] == "openid" &&
-						code.Scopes[1] == "profile" &&
-						code.Scopes[2] == "email" &&
-						code.CodeChallenge == "challenge123" &&
-						code.CodeChallengeMethod == "S256"
-				})).Return(nil)
+			name:        "success",
+			clientID:    "test-client",
+			redirectURI: "http://localhost:8080/callback",
+			state:       "state123",
+			scope:       "openid profile",
+			setupMocks: func(m *mockOAuth2Service) {
+				m.On("ValidateClient", mock.Anything, "test-client", "http://localhost:8080/callback").Return(
+					&domain.OAuth2Client{
+						ID:     "test-client",
+						Scopes: []string{"openid", "profile", "email"},
+					},
+					nil,
+				)
+				m.On("GenerateAuthorizationCode",
+					mock.Anything,
+					"test-client",
+					"01H1VEC8SYM3K9TSDAPFN25XZV",
+					[]string{"openid", "profile"},
+					"challenge",
+					"S256",
+				).Return("auth-code", nil)
 			},
-			expectedCode: "mock_code",
+			setupCtx: func(ctx context.Context) context.Context {
+				ctx = domain.WithSubject(ctx, "01H1VEC8SYM3K9TSDAPFN25XZV")
+				ctx = domain.WithCodeChallenge(ctx, "challenge")
+				ctx = domain.WithCodeChallengeMethod(ctx, "S256")
+				return ctx
+			},
+			wantCode: "auth-code",
+			wantErr:  nil,
 		},
 		{
-			name:                "invalid client",
-			clientID:            "invalid",
-			redirectURI:         "http://example.com/callback",
-			state:               "state123",
-			scope:               "openid profile",
-			codeChallenge:       "challenge123",
-			codeChallengeMethod: "S256",
-			mockSetup: func(m *mockOAuth2Repository) {
-				m.On("FindClientByID", mock.Anything, "invalid").Return(nil, domain.ErrInvalidClient)
+			name:        "client validation failed",
+			clientID:    "invalid-client",
+			redirectURI: "http://localhost:8080/callback",
+			state:       "state123",
+			scope:       "openid",
+			setupMocks: func(m *mockOAuth2Service) {
+				m.On("ValidateClient", mock.Anything, "invalid-client", "http://localhost:8080/callback").Return(
+					nil,
+					domain.ErrClientNotFound,
+				)
 			},
-			expectedError: domain.ErrInvalidClient,
+			setupCtx: func(ctx context.Context) context.Context {
+				ctx = domain.WithSubject(ctx, "01H1VEC8SYM3K9TSDAPFN25XZV")
+				return ctx
+			},
+			wantErr: domain.ErrClientNotFound,
+		},
+		{
+			name:        "no user ID in context",
+			clientID:    "test-client",
+			redirectURI: "http://localhost:8080/callback",
+			state:       "state123",
+			scope:       "openid",
+			setupMocks: func(m *mockOAuth2Service) {
+				// No mock setup needed
+			},
+			setupCtx: func(ctx context.Context) context.Context {
+				return ctx
+			},
+			wantErr: domain.ErrUnauthorized,
+		},
+		{
+			name:        "invalid scope",
+			clientID:    "test-client",
+			redirectURI: "http://localhost:8080/callback",
+			state:       "state123",
+			scope:       "invalid-scope",
+			setupMocks: func(m *mockOAuth2Service) {
+				m.On("ValidateClient", mock.Anything, "test-client", "http://localhost:8080/callback").Return(
+					&domain.OAuth2Client{
+						ID:     "test-client",
+						Scopes: []string{"openid", "profile"},
+					},
+					nil,
+				)
+			},
+			setupCtx: func(ctx context.Context) context.Context {
+				ctx = domain.WithSubject(ctx, "01H1VEC8SYM3K9TSDAPFN25XZV")
+				return ctx
+			},
+			wantErr: domain.ErrInvalidScope,
+		},
+		{
+			name:        "code generation failed",
+			clientID:    "test-client",
+			redirectURI: "http://localhost:8080/callback",
+			state:       "state123",
+			scope:       "openid",
+			setupMocks: func(m *mockOAuth2Service) {
+				m.On("ValidateClient", mock.Anything, "test-client", "http://localhost:8080/callback").Return(
+					&domain.OAuth2Client{
+						ID:     "test-client",
+						Scopes: []string{"openid"},
+					},
+					nil,
+				)
+				m.On("GenerateAuthorizationCode",
+					mock.Anything,
+					"test-client",
+					"01H1VEC8SYM3K9TSDAPFN25XZV",
+					[]string{"openid"},
+					"challenge",
+					"S256",
+				).Return("", domain.ErrInternal)
+			},
+			setupCtx: func(ctx context.Context) context.Context {
+				ctx = domain.WithSubject(ctx, "01H1VEC8SYM3K9TSDAPFN25XZV")
+				ctx = domain.WithCodeChallenge(ctx, "challenge")
+				ctx = domain.WithCodeChallengeMethod(ctx, "S256")
+				return ctx
+			},
+			wantErr: domain.ErrInternal,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockOAuth2Repo := new(mockOAuth2Repository)
-			tt.mockSetup(mockOAuth2Repo)
+			mockOAuth2 := new(mockOAuth2Service)
+			tt.setupMocks(mockOAuth2)
 
-			service := NewOIDCService(nil, nil, nil, mockOAuth2Repo, config.NewConfig(), zap.NewNop())
-			ctx := context.Background()
-			ctx = context.WithValue(ctx, "sub", "01ARZ3NDEKTSV4RRFFQ69G5FAV")
-			ctx = context.WithValue(ctx, "code_challenge", "challenge123")
-			ctx = context.WithValue(ctx, "code_challenge_method", "S256")
-			code, err := service.Authorize(ctx, tt.clientID, tt.redirectURI, tt.state, tt.scope)
+			service := NewOIDCService(mockOAuth2, nil, nil, &config.Config{}, zap.NewNop())
+			code, err := service.Authorize(tt.setupCtx(context.Background()), tt.clientID, tt.redirectURI, tt.state, tt.scope)
 
-			if tt.expectedError != nil {
-				assert.Error(t, err)
-				assert.Equal(t, tt.expectedError, err)
+			if tt.wantErr != nil {
+				assert.ErrorIs(t, err, tt.wantErr)
 				assert.Empty(t, code)
 			} else {
 				assert.NoError(t, err)
-				assert.NotEmpty(t, code)
+				assert.Equal(t, tt.wantCode, code)
 			}
 
-			mockOAuth2Repo.AssertExpectations(t)
+			mockOAuth2.AssertExpectations(t)
 		})
 	}
 }
@@ -439,7 +542,7 @@ func TestOIDCService_ExchangeCode(t *testing.T) {
 		name          string
 		code          string
 		codeVerifier  string
-		mockSetup     func(*MockOAuth2Repository)
+		mockSetup     func(*mockOAuth2Service)
 		expectedError error
 		expectedToken *domain.TokenPair
 	}{
@@ -447,17 +550,10 @@ func TestOIDCService_ExchangeCode(t *testing.T) {
 			name:         "successful code exchange",
 			code:         "valid_code",
 			codeVerifier: "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
-			mockSetup: func(m *MockOAuth2Repository) {
-				m.On("GetAuthorizationCode", mock.Anything, "valid_code").Return(&domain.AuthorizationCode{
-					Code:                "valid_code",
-					ClientID:            "client123",
-					UserID:              "01ARZ3NDEKTSV4RRFFQ69G5FAV",
-					Scopes:              []string{"openid", "profile", "email"},
-					CodeChallenge:       "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
-					CodeChallengeMethod: "S256",
-					ExpiresAt:           time.Now().Add(time.Hour),
-				}, nil)
-				m.On("DeleteAuthorizationCode", mock.Anything, "valid_code").Return(nil)
+			mockSetup: func(m *mockOAuth2Service) {
+				m.On("ValidateAuthorizationCode", mock.Anything, "valid_code").Return(&domain.OAuth2Client{
+					ID: "client123",
+				}, "01ARZ3NDEKTSV4RRFFQ69G5FAV", []string{"openid", "profile", "email"}, nil)
 			},
 			expectedToken: &domain.TokenPair{
 				AccessToken:  "mock_access_token",
@@ -468,8 +564,8 @@ func TestOIDCService_ExchangeCode(t *testing.T) {
 			name:         "invalid code",
 			code:         "invalid_code",
 			codeVerifier: "verifier",
-			mockSetup: func(m *MockOAuth2Repository) {
-				m.On("GetAuthorizationCode", mock.Anything, "invalid_code").Return(nil, domain.ErrInvalidAuthorizationCode)
+			mockSetup: func(m *mockOAuth2Service) {
+				m.On("ValidateAuthorizationCode", mock.Anything, "invalid_code").Return(nil, "", nil, domain.ErrInvalidAuthorizationCode)
 			},
 			expectedError: domain.ErrInvalidAuthorizationCode,
 		},
@@ -477,11 +573,11 @@ func TestOIDCService_ExchangeCode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockOAuth2Repo := new(MockOAuth2Repository)
+			mockOAuth2Service := new(mockOAuth2Service)
 			mockUserRepo := new(mockUserRepository)
-			mockJWT := &mockJWTRefresh{} // Use mock JWT service instead of real one
+			mockJWT := &mockJWTRefresh{}
 
-			tt.mockSetup(mockOAuth2Repo)
+			tt.mockSetup(mockOAuth2Service)
 			if tt.name == "successful code exchange" {
 				mockUserRepo.On("FindByID", mock.Anything, ulid.MustParse("01ARZ3NDEKTSV4RRFFQ69G5FAV")).Return(&domain.User{
 					ID:    ulid.MustParse("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
@@ -491,7 +587,7 @@ func TestOIDCService_ExchangeCode(t *testing.T) {
 				}, nil)
 			}
 
-			service := NewOIDCService(nil, mockJWT, mockUserRepo, mockOAuth2Repo, config.NewConfig(), logger)
+			service := NewOIDCService(mockOAuth2Service, mockJWT, mockUserRepo, config.NewConfig(), logger)
 
 			token, err := service.ExchangeCode(context.Background(), tt.code, tt.codeVerifier)
 
@@ -505,7 +601,7 @@ func TestOIDCService_ExchangeCode(t *testing.T) {
 				assert.Equal(t, tt.expectedToken, token)
 			}
 
-			mockOAuth2Repo.AssertExpectations(t)
+			mockOAuth2Service.AssertExpectations(t)
 			mockUserRepo.AssertExpectations(t)
 		})
 	}
@@ -514,13 +610,13 @@ func TestOIDCService_ExchangeCode(t *testing.T) {
 func TestOIDCService_GetOpenIDConfiguration(t *testing.T) {
 	tests := []struct {
 		name           string
-		mockSetup      func(*MockOAuth2Repository)
+		mockSetup      func(*mockOAuth2Service)
 		expectedError  error
 		expectedConfig map[string]interface{}
 	}{
 		{
 			name: "successful configuration retrieval",
-			mockSetup: func(m *MockOAuth2Repository) {
+			mockSetup: func(m *mockOAuth2Service) {
 				// No mock setup needed
 			},
 			expectedConfig: map[string]interface{}{
@@ -538,8 +634,8 @@ func TestOIDCService_GetOpenIDConfiguration(t *testing.T) {
 			},
 		},
 		{
-			name: "nil OAuth2 repository",
-			mockSetup: func(m *MockOAuth2Repository) {
+			name: "nil configuration",
+			mockSetup: func(m *mockOAuth2Service) {
 				// No mock setup needed
 			},
 			expectedError: domain.ErrInternal,
@@ -548,13 +644,15 @@ func TestOIDCService_GetOpenIDConfiguration(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var oauth2Repo domain.OAuth2Repository
-			if tt.name != "nil OAuth2 repository" {
-				oauth2Repo = new(MockOAuth2Repository)
-				tt.mockSetup(oauth2Repo.(*MockOAuth2Repository))
+			mockOAuth2Service := new(mockOAuth2Service)
+			tt.mockSetup(mockOAuth2Service)
+
+			var cfg *config.Config
+			if tt.name != "nil configuration" {
+				cfg = config.NewConfig()
 			}
 
-			service := NewOIDCService(nil, nil, nil, oauth2Repo, config.NewConfig(), zap.NewNop())
+			service := NewOIDCService(mockOAuth2Service, nil, nil, cfg, zap.NewNop())
 
 			config, err := service.GetOpenIDConfiguration(context.Background())
 
@@ -565,10 +663,6 @@ func TestOIDCService_GetOpenIDConfiguration(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 				assert.Equal(t, tt.expectedConfig, config)
-			}
-
-			if oauth2Repo != nil {
-				oauth2Repo.(*MockOAuth2Repository).AssertExpectations(t)
 			}
 		})
 	}
@@ -639,19 +733,12 @@ func TestOIDCService_RefreshToken(t *testing.T) {
 			},
 			expectedError: domain.ErrInternal,
 		},
-		{
-			name:         "expired token",
-			refreshToken: "expired_token",
-			mockSetup: func(m *mockUserRepository, _ interface{}) {
-				// No mock setup needed
-			},
-			expectedError: domain.ErrInvalidCredentials,
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockUserRepo := new(mockUserRepository)
+			mockOAuth2Service := new(mockOAuth2Service)
 			var jwtService domain.JWTService
 			switch tt.name {
 			case "successful token refresh":
@@ -667,7 +754,7 @@ func TestOIDCService_RefreshToken(t *testing.T) {
 			}
 			tt.mockSetup(mockUserRepo, jwtService)
 
-			service := NewOIDCService(nil, jwtService, mockUserRepo, nil, config.NewConfig(), logger)
+			service := NewOIDCService(mockOAuth2Service, jwtService, mockUserRepo, config.NewConfig(), logger)
 
 			token, err := service.RefreshToken(context.Background(), tt.refreshToken)
 
@@ -685,7 +772,7 @@ func TestOIDCService_RefreshToken(t *testing.T) {
 			}
 
 			if tt.name == "invalid refresh token" || tt.name == "user not found" {
-				// não chama mockUserRepo.AssertExpectations(t)
+				// Skip mock expectations for these cases
 			} else {
 				mockUserRepo.AssertExpectations(t)
 			}

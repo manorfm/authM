@@ -64,69 +64,57 @@ func (m *MockOAuth2Repository) DeleteAuthorizationCode(ctx context.Context, code
 
 func TestOAuth2Service_ValidateClient(t *testing.T) {
 	tests := []struct {
-		name          string
-		clientID      string
-		redirectURI   string
-		mockSetup     func(*MockOAuth2Repository)
-		expectedError error
+		name        string
+		clientID    string
+		redirectURI string
+		setupMock   func(*MockOAuth2Repository)
+		wantErr     error
 	}{
 		{
-			name:        "successful client validation",
-			clientID:    "client123",
-			redirectURI: "http://example.com/callback",
-			mockSetup: func(m *MockOAuth2Repository) {
-				m.On("FindClientByID", mock.Anything, "client123").Return(&domain.OAuth2Client{
-					ID:           "client123",
-					Secret:       "secret",
-					RedirectURIs: []string{"http://example.com/callback"},
-					GrantTypes:   []string{"authorization_code"},
-					Scopes:       []string{"openid"},
-					CreatedAt:    time.Now(),
-					UpdatedAt:    time.Now(),
+			name:        "success",
+			clientID:    "test-client",
+			redirectURI: "http://localhost:8080/callback",
+			setupMock: func(m *MockOAuth2Repository) {
+				m.On("FindClientByID", mock.Anything, "test-client").Return(&domain.OAuth2Client{
+					ID:           "test-client",
+					RedirectURIs: []string{"http://localhost:8080/callback"},
 				}, nil)
 			},
-			expectedError: nil,
+			wantErr: nil,
 		},
 		{
 			name:        "client not found",
-			clientID:    "nonexistent",
-			redirectURI: "http://example.com/callback",
-			mockSetup: func(m *MockOAuth2Repository) {
-				m.On("FindClientByID", mock.Anything, "nonexistent").Return(nil, domain.ErrClientNotFound)
+			clientID:    "non-existent",
+			redirectURI: "http://localhost:8080/callback",
+			setupMock: func(m *MockOAuth2Repository) {
+				m.On("FindClientByID", mock.Anything, "non-existent").Return(nil, domain.ErrClientNotFound)
 			},
-			expectedError: domain.ErrClientNotFound,
+			wantErr: domain.ErrClientNotFound,
 		},
 		{
 			name:        "invalid redirect URI",
-			clientID:    "client123",
-			redirectURI: "http://malicious.com/callback",
-			mockSetup: func(m *MockOAuth2Repository) {
-				m.On("FindClientByID", mock.Anything, "client123").Return(&domain.OAuth2Client{
-					ID:           "client123",
-					Secret:       "secret",
-					RedirectURIs: []string{"http://example.com/callback"},
-					GrantTypes:   []string{"authorization_code"},
-					Scopes:       []string{"openid"},
-					CreatedAt:    time.Now(),
-					UpdatedAt:    time.Now(),
+			clientID:    "test-client",
+			redirectURI: "http://invalid.com/callback",
+			setupMock: func(m *MockOAuth2Repository) {
+				m.On("FindClientByID", mock.Anything, "test-client").Return(&domain.OAuth2Client{
+					ID:           "test-client",
+					RedirectURIs: []string{"http://localhost:8080/callback"},
 				}, nil)
 			},
-			expectedError: domain.ErrInvalidRedirectURI,
+			wantErr: domain.ErrInvalidRedirectURI,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockRepo := new(MockOAuth2Repository)
-			tt.mockSetup(mockRepo)
+			tt.setupMock(mockRepo)
 
 			service := NewOAuth2Service(mockRepo, zap.NewNop())
-
 			client, err := service.ValidateClient(context.Background(), tt.clientID, tt.redirectURI)
 
-			if tt.expectedError != nil {
-				assert.Error(t, err)
-				assert.Equal(t, tt.expectedError, err)
+			if tt.wantErr != nil {
+				assert.ErrorIs(t, err, tt.wantErr)
 				assert.Nil(t, client)
 			} else {
 				assert.NoError(t, err)
@@ -139,125 +127,222 @@ func TestOAuth2Service_ValidateClient(t *testing.T) {
 	}
 }
 
-func TestOAuth2Service_GenerateAndValidateAuthorizationCode(t *testing.T) {
+func TestOAuth2Service_GenerateAuthorizationCode(t *testing.T) {
 	tests := []struct {
-		name                   string
-		clientID               string
-		userID                 string
-		scopes                 []string
-		mockSetup              func(*MockOAuth2Repository)
-		expectedGeneratedError error
-		expectedValidatedError error
+		name                string
+		clientID            string
+		userID              string
+		scopes              []string
+		codeChallenge       string
+		codeChallengeMethod string
+		setupMock           func(*MockOAuth2Repository)
+		wantErr             error
 	}{
 		{
-			name:     "successful code generation and validation",
-			clientID: "client123",
-			userID:   "user123",
-			scopes:   []string{"openid", "profile"},
-			mockSetup: func(m *MockOAuth2Repository) {
-				// Setup for code generation
+			name:                "success",
+			clientID:            "test-client",
+			userID:              "test-user",
+			scopes:              []string{"openid", "profile"},
+			codeChallenge:       "challenge",
+			codeChallengeMethod: "S256",
+			setupMock: func(m *MockOAuth2Repository) {
 				m.On("CreateAuthorizationCode", mock.Anything, mock.MatchedBy(func(code *domain.AuthorizationCode) bool {
-					return code.ClientID == "client123" &&
-						code.UserID == "user123" &&
+					return code.ClientID == "test-client" &&
+						code.UserID == "test-user" &&
 						len(code.Scopes) == 2 &&
-						code.Scopes[0] == "openid" &&
-						code.Scopes[1] == "profile"
+						code.CodeChallenge == "challenge" &&
+						code.CodeChallengeMethod == "S256"
 				})).Return(nil)
-
-				// Setup for code validation
-				m.On("GetAuthorizationCode", mock.Anything, mock.Anything).Return(&domain.AuthorizationCode{
-					Code:      "test_code",
-					ClientID:  "client123",
-					UserID:    "user123",
-					Scopes:    []string{"openid", "profile"},
-					ExpiresAt: time.Now().Add(time.Hour),
-					CreatedAt: time.Now(),
-				}, nil)
-
-				m.On("FindClientByID", mock.Anything, "client123").Return(&domain.OAuth2Client{
-					ID:           "client123",
-					Secret:       "secret",
-					RedirectURIs: []string{"http://example.com/callback"},
-					GrantTypes:   []string{"authorization_code"},
-					Scopes:       []string{"openid", "profile"},
-					CreatedAt:    time.Now(),
-					UpdatedAt:    time.Now(),
-				}, nil)
-
-				m.On("DeleteAuthorizationCode", mock.Anything, mock.Anything).Return(nil)
 			},
-			expectedGeneratedError: nil,
-			expectedValidatedError: nil,
+			wantErr: nil,
 		},
 		{
-			name:     "failed code generation",
-			clientID: "client123",
-			userID:   "user123",
-			scopes:   []string{"openid"},
-			mockSetup: func(m *MockOAuth2Repository) {
-				m.On("CreateAuthorizationCode", mock.Anything, mock.Anything).Return(assert.AnError)
+			name:                "repository error",
+			clientID:            "test-client",
+			userID:              "test-user",
+			scopes:              []string{"openid"},
+			codeChallenge:       "challenge",
+			codeChallengeMethod: "S256",
+			setupMock: func(m *MockOAuth2Repository) {
+				m.On("CreateAuthorizationCode", mock.Anything, mock.Anything).Return(domain.ErrInternal)
 			},
-			expectedGeneratedError: assert.AnError,
-			expectedValidatedError: nil,
-		},
-		{
-			name:     "expired code",
-			clientID: "client123",
-			userID:   "user123",
-			scopes:   []string{"openid"},
-			mockSetup: func(m *MockOAuth2Repository) {
-				m.On("CreateAuthorizationCode", mock.Anything, mock.Anything).Return(nil)
-				m.On("GetAuthorizationCode", mock.Anything, mock.Anything).Return(&domain.AuthorizationCode{
-					Code:      "test_code",
-					ClientID:  "client123",
-					UserID:    "user123",
-					Scopes:    []string{"openid"},
-					ExpiresAt: time.Now().Add(-time.Hour), // Expired
-					CreatedAt: time.Now().Add(-2 * time.Hour),
-				}, nil)
-				m.On("DeleteAuthorizationCode", mock.Anything, mock.Anything).Return(nil)
-			},
-			expectedGeneratedError: nil,
-			expectedValidatedError: domain.ErrInvalidAuthorizationCode,
+			wantErr: domain.ErrInternal,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockRepo := new(MockOAuth2Repository)
-			tt.mockSetup(mockRepo)
+			tt.setupMock(mockRepo)
 
 			service := NewOAuth2Service(mockRepo, zap.NewNop())
+			code, err := service.GenerateAuthorizationCode(
+				context.Background(),
+				tt.clientID,
+				tt.userID,
+				tt.scopes,
+				tt.codeChallenge,
+				tt.codeChallengeMethod,
+			)
 
-			// Test code generation
-			code, err := service.GenerateAuthorizationCode(context.Background(), tt.clientID, tt.userID, tt.scopes)
-			if tt.expectedGeneratedError != nil {
-				assert.Error(t, err)
-				assert.Equal(t, tt.expectedGeneratedError, err)
+			if tt.wantErr != nil {
+				assert.ErrorIs(t, err, tt.wantErr)
 				assert.Empty(t, code)
-				return
+			} else {
+				assert.NoError(t, err)
+				assert.NotEmpty(t, code)
 			}
 
-			assert.NoError(t, err)
-			assert.NotEmpty(t, code)
+			mockRepo.AssertExpectations(t)
+		})
+	}
+}
 
-			// Test code validation
-			client, userID, scopes, err := service.ValidateAuthorizationCode(context.Background(), code)
-			if tt.expectedValidatedError != nil {
-				assert.Error(t, err)
-				assert.Equal(t, tt.expectedValidatedError, err)
+func TestOAuth2Service_ValidateAuthorizationCode(t *testing.T) {
+	tests := []struct {
+		name       string
+		code       string
+		setupMock  func(*MockOAuth2Repository)
+		wantClient *domain.OAuth2Client
+		wantUserID string
+		wantScopes []string
+		wantErr    error
+	}{
+		{
+			name: "success",
+			code: "valid-code",
+			setupMock: func(m *MockOAuth2Repository) {
+				m.On("GetAuthorizationCode", mock.Anything, "valid-code").Return(&domain.AuthorizationCode{
+					Code:      "valid-code",
+					ClientID:  "test-client",
+					UserID:    "test-user",
+					Scopes:    []string{"openid", "profile"},
+					ExpiresAt: time.Now().Add(time.Hour),
+				}, nil)
+				m.On("FindClientByID", mock.Anything, "test-client").Return(&domain.OAuth2Client{
+					ID: "test-client",
+				}, nil)
+				m.On("DeleteAuthorizationCode", mock.Anything, "valid-code").Return(nil)
+			},
+			wantClient: &domain.OAuth2Client{ID: "test-client"},
+			wantUserID: "test-user",
+			wantScopes: []string{"openid", "profile"},
+			wantErr:    nil,
+		},
+		{
+			name: "code not found",
+			code: "invalid-code",
+			setupMock: func(m *MockOAuth2Repository) {
+				m.On("GetAuthorizationCode", mock.Anything, "invalid-code").Return(nil, domain.ErrInvalidAuthorizationCode)
+			},
+			wantErr: domain.ErrInvalidAuthorizationCode,
+		},
+		{
+			name: "expired code",
+			code: "expired-code",
+			setupMock: func(m *MockOAuth2Repository) {
+				m.On("GetAuthorizationCode", mock.Anything, "expired-code").Return(&domain.AuthorizationCode{
+					Code:      "expired-code",
+					ExpiresAt: time.Now().Add(-time.Hour),
+				}, nil)
+			},
+			wantErr: domain.ErrAuthorizationCodeExpired,
+		},
+		{
+			name: "client not found",
+			code: "valid-code",
+			setupMock: func(m *MockOAuth2Repository) {
+				m.On("GetAuthorizationCode", mock.Anything, "valid-code").Return(&domain.AuthorizationCode{
+					Code:      "valid-code",
+					ClientID:  "non-existent",
+					ExpiresAt: time.Now().Add(time.Hour),
+				}, nil)
+				m.On("FindClientByID", mock.Anything, "non-existent").Return(nil, domain.ErrClientNotFound)
+			},
+			wantErr: domain.ErrClientNotFound,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockRepo := new(MockOAuth2Repository)
+			tt.setupMock(mockRepo)
+
+			service := NewOAuth2Service(mockRepo, zap.NewNop())
+			client, userID, scopes, err := service.ValidateAuthorizationCode(context.Background(), tt.code)
+
+			if tt.wantErr != nil {
+				assert.ErrorIs(t, err, tt.wantErr)
 				assert.Nil(t, client)
 				assert.Empty(t, userID)
 				assert.Nil(t, scopes)
 			} else {
 				assert.NoError(t, err)
-				assert.NotNil(t, client)
-				assert.Equal(t, tt.clientID, client.ID)
-				assert.Equal(t, tt.userID, userID)
-				assert.Equal(t, tt.scopes, scopes)
+				assert.Equal(t, tt.wantClient, client)
+				assert.Equal(t, tt.wantUserID, userID)
+				assert.Equal(t, tt.wantScopes, scopes)
 			}
 
 			mockRepo.AssertExpectations(t)
+		})
+	}
+}
+
+func TestOAuth2Service_ValidatePKCE(t *testing.T) {
+	tests := []struct {
+		name                string
+		codeVerifier        string
+		codeChallenge       string
+		codeChallengeMethod string
+		wantErr             error
+	}{
+		{
+			name:                "success S256",
+			codeVerifier:        "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
+			codeChallenge:       "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+			codeChallengeMethod: "S256",
+			wantErr:             nil,
+		},
+		{
+			name:                "success plain",
+			codeVerifier:        "verifier",
+			codeChallenge:       "verifier",
+			codeChallengeMethod: "plain",
+			wantErr:             nil,
+		},
+		{
+			name:                "invalid method",
+			codeVerifier:        "verifier",
+			codeChallenge:       "challenge",
+			codeChallengeMethod: "invalid",
+			wantErr:             domain.ErrInvalidCodeChallengeMethod,
+		},
+		{
+			name:                "challenge mismatch S256",
+			codeVerifier:        "verifier",
+			codeChallenge:       "invalid",
+			codeChallengeMethod: "S256",
+			wantErr:             domain.ErrInvalidCodeChallenge,
+		},
+		{
+			name:                "challenge mismatch plain",
+			codeVerifier:        "verifier",
+			codeChallenge:       "invalid",
+			codeChallengeMethod: "plain",
+			wantErr:             domain.ErrInvalidCodeChallenge,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			service := NewOAuth2Service(nil, zap.NewNop())
+			err := service.ValidatePKCE(context.Background(), tt.codeVerifier, tt.codeChallenge, tt.codeChallengeMethod)
+
+			if tt.wantErr != nil {
+				assert.ErrorIs(t, err, tt.wantErr)
+			} else {
+				assert.NoError(t, err)
+			}
 		})
 	}
 }

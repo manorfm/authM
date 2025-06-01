@@ -35,7 +35,7 @@ type OAuth2Service interface {
 	ValidateClient(ctx context.Context, clientID, redirectURI string) (*OAuth2Client, error)
 
 	// GenerateAuthorizationCode generates a new authorization code for the client and user
-	GenerateAuthorizationCode(ctx context.Context, clientID, userID string, scopes []string) (string, error)
+	GenerateAuthorizationCode(ctx context.Context, clientID, userID string, scopes []string, codeChallenge, codeChallengeMethod string) (string, error)
 
 	// ValidateAuthorizationCode validates an authorization code and returns the associated data
 	ValidateAuthorizationCode(ctx context.Context, code string) (*OAuth2Client, string, []string, error)
