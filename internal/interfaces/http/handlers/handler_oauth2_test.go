@@ -17,6 +17,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// MockOAuth2Repository is a mock implementation of domain.OAuth2Repository
 type MockOAuth2Repository struct {
 	mock.Mock
 }
@@ -54,17 +55,17 @@ func (m *MockOAuth2Repository) CreateAuthorizationCode(ctx context.Context, code
 	return args.Error(0)
 }
 
-func (m *MockOAuth2Repository) DeleteAuthorizationCode(ctx context.Context, code string) error {
-	args := m.Called(ctx, code)
-	return args.Error(0)
-}
-
 func (m *MockOAuth2Repository) GetAuthorizationCode(ctx context.Context, code string) (*domain.AuthorizationCode, error) {
 	args := m.Called(ctx, code)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
 	return args.Get(0).(*domain.AuthorizationCode), args.Error(1)
+}
+
+func (m *MockOAuth2Repository) DeleteAuthorizationCode(ctx context.Context, code string) error {
+	args := m.Called(ctx, code)
+	return args.Error(0)
 }
 
 func setupTest(t *testing.T) (*OAuth2Handler, *MockOAuth2Repository) {
@@ -336,7 +337,7 @@ func TestListClientsHandler(t *testing.T) {
 					{
 						ID:           "client1",
 						Secret:       "secret1",
-						RedirectURIs: []string{"http://localhost:8080/callback1"},
+						RedirectURIs: []string{"http://localhost:8080/callback"},
 						GrantTypes:   []string{"authorization_code"},
 						Scopes:       []string{"openid", "profile"},
 						CreatedAt:    time.Now(),
@@ -345,7 +346,7 @@ func TestListClientsHandler(t *testing.T) {
 					{
 						ID:           "client2",
 						Secret:       "secret2",
-						RedirectURIs: []string{"http://localhost:8080/callback2"},
+						RedirectURIs: []string{"http://localhost:8080/callback"},
 						GrantTypes:   []string{"authorization_code"},
 						Scopes:       []string{"openid", "profile"},
 						CreatedAt:    time.Now(),

@@ -220,7 +220,7 @@ type mockJWTInvalidUserID struct{}
 func (m *mockJWTInvalidUserID) ValidateToken(token string) (*domain.Claims, error) {
 	return &domain.Claims{
 		RegisteredClaims: &jwtv5.RegisteredClaims{
-			Subject: "invalid",
+			Subject: "invalid_user_id",
 		},
 		Roles: []string{"user"},
 	}, nil
@@ -275,7 +275,7 @@ func (m *mockJWTTokenGenError) GetJWKS(ctx context.Context) (map[string]interfac
 }
 
 func (m *mockJWTTokenGenError) GenerateTokenPair(userID ulid.ULID, roles []string) (*domain.TokenPair, error) {
-	return nil, domain.ErrTokenGeneration
+	return nil, domain.ErrInternal
 }
 
 func (m *mockJWTTokenGenError) BlacklistToken(tokenID string, expiresAt time.Time) error {
@@ -439,7 +439,7 @@ func TestOIDCService_ExchangeCode(t *testing.T) {
 		name          string
 		code          string
 		codeVerifier  string
-		mockSetup     func(*mockOAuth2Repository)
+		mockSetup     func(*MockOAuth2Repository)
 		expectedError error
 		expectedToken *domain.TokenPair
 	}{
@@ -447,7 +447,7 @@ func TestOIDCService_ExchangeCode(t *testing.T) {
 			name:         "successful code exchange",
 			code:         "valid_code",
 			codeVerifier: "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
-			mockSetup: func(m *mockOAuth2Repository) {
+			mockSetup: func(m *MockOAuth2Repository) {
 				m.On("GetAuthorizationCode", mock.Anything, "valid_code").Return(&domain.AuthorizationCode{
 					Code:                "valid_code",
 					ClientID:            "client123",
@@ -468,7 +468,7 @@ func TestOIDCService_ExchangeCode(t *testing.T) {
 			name:         "invalid code",
 			code:         "invalid_code",
 			codeVerifier: "verifier",
-			mockSetup: func(m *mockOAuth2Repository) {
+			mockSetup: func(m *MockOAuth2Repository) {
 				m.On("GetAuthorizationCode", mock.Anything, "invalid_code").Return(nil, domain.ErrInvalidAuthorizationCode)
 			},
 			expectedError: domain.ErrInvalidAuthorizationCode,
@@ -477,7 +477,7 @@ func TestOIDCService_ExchangeCode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockOAuth2Repo := new(mockOAuth2Repository)
+			mockOAuth2Repo := new(MockOAuth2Repository)
 			mockUserRepo := new(mockUserRepository)
 			mockJWT := &mockJWTRefresh{} // Use mock JWT service instead of real one
 
@@ -514,13 +514,13 @@ func TestOIDCService_ExchangeCode(t *testing.T) {
 func TestOIDCService_GetOpenIDConfiguration(t *testing.T) {
 	tests := []struct {
 		name           string
-		mockSetup      func(*mockOAuth2Repository)
+		mockSetup      func(*MockOAuth2Repository)
 		expectedError  error
 		expectedConfig map[string]interface{}
 	}{
 		{
 			name: "successful configuration retrieval",
-			mockSetup: func(m *mockOAuth2Repository) {
+			mockSetup: func(m *MockOAuth2Repository) {
 				// No mock setup needed
 			},
 			expectedConfig: map[string]interface{}{
@@ -539,7 +539,7 @@ func TestOIDCService_GetOpenIDConfiguration(t *testing.T) {
 		},
 		{
 			name: "nil OAuth2 repository",
-			mockSetup: func(m *mockOAuth2Repository) {
+			mockSetup: func(m *MockOAuth2Repository) {
 				// No mock setup needed
 			},
 			expectedError: domain.ErrInternal,
@@ -550,8 +550,8 @@ func TestOIDCService_GetOpenIDConfiguration(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var oauth2Repo domain.OAuth2Repository
 			if tt.name != "nil OAuth2 repository" {
-				oauth2Repo = new(mockOAuth2Repository)
-				tt.mockSetup(oauth2Repo.(*mockOAuth2Repository))
+				oauth2Repo = new(MockOAuth2Repository)
+				tt.mockSetup(oauth2Repo.(*MockOAuth2Repository))
 			}
 
 			service := NewOIDCService(nil, nil, nil, oauth2Repo, config.NewConfig(), zap.NewNop())
@@ -568,7 +568,7 @@ func TestOIDCService_GetOpenIDConfiguration(t *testing.T) {
 			}
 
 			if oauth2Repo != nil {
-				oauth2Repo.(*mockOAuth2Repository).AssertExpectations(t)
+				oauth2Repo.(*MockOAuth2Repository).AssertExpectations(t)
 			}
 		})
 	}

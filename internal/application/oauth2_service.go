@@ -4,60 +4,35 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
-	"errors"
-	"sync"
 	"time"
 
 	"github.com/ipede/user-manager-service/internal/domain"
+	"go.uber.org/zap"
 )
-
-var (
-	ErrClientNotFound     = errors.New("client not found")
-	ErrInvalidRedirectURI = errors.New("invalid redirect URI")
-	ErrInvalidCode        = errors.New("invalid authorization code")
-)
-
-type authorizationCode struct {
-	ClientID string
-	UserID   string
-	Scopes   []string
-	Expires  time.Time
-}
 
 type OAuth2Service struct {
-	clients map[string]*domain.OAuth2Client
-	codes   map[string]*authorizationCode
-	mu      sync.RWMutex
+	oauthRepo domain.OAuth2Repository
+	logger    *zap.Logger
 }
 
-func NewOAuth2Service() *OAuth2Service {
-	// Initialize with some test clients
-	service := &OAuth2Service{
-		clients: make(map[string]*domain.OAuth2Client),
-		codes:   make(map[string]*authorizationCode),
+func NewOAuth2Service(oauthRepo domain.OAuth2Repository, logger *zap.Logger) *OAuth2Service {
+	return &OAuth2Service{
+		oauthRepo: oauthRepo,
+		logger:    logger,
 	}
-
-	// Add a test client
-	service.clients["test"] = &domain.OAuth2Client{
-		ID:           "test",
-		Secret:       "test_secret",
-		RedirectURIs: []string{"http://localhost:3000/callback"},
-		GrantTypes:   []string{"authorization_code", "refresh_token"},
-		Scopes:       []string{"openid", "profile", "email"},
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
-	}
-
-	return service
 }
 
 func (s *OAuth2Service) ValidateClient(ctx context.Context, clientID, redirectURI string) (*domain.OAuth2Client, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.logger.Debug("Validating client",
+		zap.String("client_id", clientID),
+		zap.String("redirect_uri", redirectURI))
 
-	client, exists := s.clients[clientID]
-	if !exists {
-		return nil, ErrClientNotFound
+	client, err := s.oauthRepo.FindClientByID(ctx, clientID)
+	if err != nil {
+		s.logger.Error("Failed to find client",
+			zap.String("client_id", clientID),
+			zap.Error(err))
+		return nil, domain.ErrClientNotFound
 	}
 
 	// Check if redirect URI is allowed
@@ -69,54 +44,84 @@ func (s *OAuth2Service) ValidateClient(ctx context.Context, clientID, redirectUR
 		}
 	}
 	if !validURI {
-		return nil, ErrInvalidRedirectURI
+		s.logger.Error("Invalid redirect URI",
+			zap.String("redirect_uri", redirectURI))
+		return nil, domain.ErrInvalidRedirectURI
 	}
 
 	return client, nil
 }
 
 func (s *OAuth2Service) GenerateAuthorizationCode(ctx context.Context, clientID, userID string, scopes []string) (string, error) {
+	s.logger.Debug("Generating authorization code",
+		zap.String("client_id", clientID),
+		zap.String("user_id", userID))
+
 	// Generate a random code
 	codeBytes := make([]byte, 32)
 	if _, err := rand.Read(codeBytes); err != nil {
+		s.logger.Error("Failed to generate random bytes for authorization code",
+			zap.Error(err))
 		return "", err
 	}
 	code := base64.RawURLEncoding.EncodeToString(codeBytes)
 
-	// Store the code
-	s.mu.Lock()
-	s.codes[code] = &authorizationCode{
-		ClientID: clientID,
-		UserID:   userID,
-		Scopes:   scopes,
-		Expires:  time.Now().Add(10 * time.Minute),
+	// Create authorization code in repository
+	authCode := &domain.AuthorizationCode{
+		Code:      code,
+		ClientID:  clientID,
+		UserID:    userID,
+		Scopes:    scopes,
+		ExpiresAt: time.Now().Add(10 * time.Minute),
+		CreatedAt: time.Now(),
 	}
-	s.mu.Unlock()
+
+	if err := s.oauthRepo.CreateAuthorizationCode(ctx, authCode); err != nil {
+		s.logger.Error("Failed to create authorization code",
+			zap.Error(err))
+		return "", err
+	}
 
 	return code, nil
 }
 
 func (s *OAuth2Service) ValidateAuthorizationCode(ctx context.Context, code string) (*domain.OAuth2Client, string, []string, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.logger.Debug("Validating authorization code",
+		zap.String("code", code))
 
-	authCode, exists := s.codes[code]
-	if !exists {
-		return nil, "", nil, ErrInvalidCode
+	// Get authorization code from repository
+	authCode, err := s.oauthRepo.GetAuthorizationCode(ctx, code)
+	if err != nil {
+		s.logger.Error("Failed to get authorization code",
+			zap.Error(err))
+		return nil, "", nil, domain.ErrInvalidAuthorizationCode
 	}
 
-	if time.Now().After(authCode.Expires) {
-		delete(s.codes, code)
-		return nil, "", nil, ErrInvalidCode
+	var deleteAuthorizationCode = func() {
+		if err := s.oauthRepo.DeleteAuthorizationCode(ctx, code); err != nil {
+			s.logger.Error("Failed to delete used authorization code",
+				zap.Error(err))
+		}
 	}
 
-	client, exists := s.clients[authCode.ClientID]
-	if !exists {
-		return nil, "", nil, ErrClientNotFound
+	// Check if code is expired
+	if time.Now().After(authCode.ExpiresAt) {
+		s.logger.Error("Authorization code expired",
+			zap.Time("expires_at", authCode.ExpiresAt))
+		deleteAuthorizationCode()
+		return nil, "", nil, domain.ErrInvalidAuthorizationCode
 	}
 
-	// Delete the code after use
-	delete(s.codes, code)
+	// Get client from repository
+	client, err := s.oauthRepo.FindClientByID(ctx, authCode.ClientID)
+	if err != nil {
+		s.logger.Error("Failed to find client",
+			zap.String("client_id", authCode.ClientID),
+			zap.Error(err))
+		return nil, "", nil, domain.ErrClientNotFound
+	}
+
+	deleteAuthorizationCode()
 
 	return client, authCode.UserID, authCode.Scopes, nil
 }

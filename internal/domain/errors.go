@@ -124,6 +124,9 @@ var (
 
 	// ErrInvalidSignature is returned when the signature is invalid
 	ErrInvalidSignature = NewBusinessError("U0030", "Invalid signature")
+
+	// ErrInvalidRedirectURI is returned when the redirect URI is invalid
+	ErrInvalidRedirectURI = NewBusinessError("U0031", "Invalid redirect URI")
 )
 
 func (e *BusinessError) GetCode() string {
