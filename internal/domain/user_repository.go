@@ -23,6 +23,9 @@ type UserRepository interface {
 	// Update updates a user
 	Update(ctx context.Context, user *User) error
 
+	// UpdatePassword updates a user's password
+	UpdatePassword(ctx context.Context, userID ulid.ULID, hashedPassword string) error
+
 	// Delete deletes a user
 	Delete(ctx context.Context, id ulid.ULID) error
 

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"github.com/ipede/user-manager-service/internal/domain"
 	"github.com/ipede/user-manager-service/internal/infrastructure/database"
@@ -15,22 +16,30 @@ type UserRepository struct {
 }
 
 func NewUserRepository(db *database.Postgres, logger *zap.Logger) *UserRepository {
-	return &UserRepository{db: db}
+	return &UserRepository{
+		db:     db,
+		logger: logger,
+	}
 }
 
 func (r *UserRepository) Create(ctx context.Context, user *domain.User) error {
-	return r.db.Exec(ctx, `
-		INSERT INTO users (id, name, email, password, phone, created_at, updated_at, roles)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-	`, user.ID.String(), user.Name, user.Email, user.Password, user.Phone, user.CreatedAt, user.UpdatedAt, user.Roles)
+	err := r.db.Exec(ctx, `
+		INSERT INTO users (id, name, email, password, phone, created_at, updated_at, roles, email_verified)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	`, user.ID.String(), user.Name, user.Email, user.Password, user.Phone, user.CreatedAt, user.UpdatedAt, user.Roles, user.EmailVerified)
+	if err != nil {
+		r.logger.Error("failed to create user", zap.Error(err))
+		return domain.ErrDatabaseQuery
+	}
+	return nil
 }
 
 func (r *UserRepository) FindByID(ctx context.Context, id ulid.ULID) (*domain.User, error) {
 	user := &domain.User{}
 	err := r.db.QueryRow(ctx, `
-		SELECT id, name, email, password, phone, created_at, updated_at, roles
+		SELECT id, name, email, password, phone, created_at, updated_at, roles, email_verified
 		FROM users WHERE id = $1
-	`, id.String()).Scan(&user.ID, &user.Name, &user.Email, &user.Password, &user.Phone, &user.CreatedAt, &user.UpdatedAt, &user.Roles)
+	`, id.String()).Scan(&user.ID, &user.Name, &user.Email, &user.Password, &user.Phone, &user.CreatedAt, &user.UpdatedAt, &user.Roles, &user.EmailVerified)
 	if err != nil {
 		r.logger.Error("failed to find user by id", zap.Error(err))
 		return nil, domain.ErrDatabaseQuery
@@ -41,9 +50,9 @@ func (r *UserRepository) FindByID(ctx context.Context, id ulid.ULID) (*domain.Us
 func (r *UserRepository) FindByEmail(ctx context.Context, email string) (*domain.User, error) {
 	user := &domain.User{}
 	err := r.db.QueryRow(ctx, `
-		SELECT id, name, email, password, phone, created_at, updated_at, roles
+		SELECT id, name, email, password, phone, created_at, updated_at, roles, email_verified
 		FROM users WHERE email = $1
-	`, email).Scan(&user.ID, &user.Name, &user.Email, &user.Password, &user.Phone, &user.CreatedAt, &user.UpdatedAt, &user.Roles)
+	`, email).Scan(&user.ID, &user.Name, &user.Email, &user.Password, &user.Phone, &user.CreatedAt, &user.UpdatedAt, &user.Roles, &user.EmailVerified)
 	if err != nil {
 		r.logger.Error("failed to find user by email", zap.Error(err))
 		return nil, domain.ErrUserNotFound
@@ -102,9 +111,9 @@ func (r *UserRepository) List(ctx context.Context, limit, offset int) ([]*domain
 func (r *UserRepository) Update(ctx context.Context, user *domain.User) error {
 	return r.db.Exec(ctx, `
 		UPDATE users
-		SET name = $1, phone = $2, updated_at = $3
-		WHERE id = $4
-	`, user.Name, user.Phone, user.UpdatedAt, user.ID.String())
+		SET name = $1, phone = $2, updated_at = $3, email_verified = $4
+		WHERE id = $5
+	`, user.Name, user.Phone, user.UpdatedAt, user.EmailVerified, user.ID.String())
 }
 
 func (r *UserRepository) RemoveRole(ctx context.Context, userID ulid.ULID, role string) error {
@@ -113,4 +122,12 @@ func (r *UserRepository) RemoveRole(ctx context.Context, userID ulid.ULID, role 
 		SET roles = array_remove(roles, $1)
 		WHERE id = $2
 	`, role, userID.String())
+}
+
+func (r *UserRepository) UpdatePassword(ctx context.Context, userID ulid.ULID, hashedPassword string) error {
+	return r.db.Exec(ctx, `
+		UPDATE users
+		SET password = $1, updated_at = $2
+		WHERE id = $3
+	`, hashedPassword, time.Now(), userID.String())
 }

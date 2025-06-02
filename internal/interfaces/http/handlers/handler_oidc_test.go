@@ -125,6 +125,11 @@ func (m *MockUserRepository) RemoveRole(ctx context.Context, userID ulid.ULID, r
 	return args.Error(0)
 }
 
+func (m *MockUserRepository) UpdatePassword(ctx context.Context, userID ulid.ULID, hashedPassword string) error {
+	args := m.Called(ctx, userID, hashedPassword)
+	return args.Error(0)
+}
+
 type MockOAuth2Service struct {
 	mock.Mock
 }

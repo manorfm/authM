@@ -34,9 +34,10 @@ func NewRouter(
 	authMiddleware := auth.NewAuthMiddleware(jwtService, logger)
 	userRepo := repository.NewUserRepository(db, logger)
 	oauthRepo := repository.NewOAuth2Repository(db, logger)
+	verificationRepo := repository.NewVerificationCodeRepository(db, logger)
 	emailService := email.NewEmailService(cfg, logger)
 	userService := application.NewUserService(userRepo, logger)
-	authService := application.NewAuthService(userRepo, jwtService, emailService, logger)
+	authService := application.NewAuthService(userRepo, verificationRepo, jwtService, emailService, logger)
 	oauth2Service := application.NewOAuth2Service(oauthRepo, logger)
 	oidcService := application.NewOIDCService(oauth2Service, jwtService, userRepo, cfg, logger)
 

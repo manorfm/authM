@@ -97,7 +97,7 @@ func LoadConfig() (*Config, error) {
 		return nil, err
 	}
 
-	smtpPort, err := strconv.Atoi(getEnv("SMTP_PORT", "587"))
+	smtpPort, err := strconv.Atoi(getEnv("SMTP_PORT", "1025"))
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +134,7 @@ func LoadConfig() (*Config, error) {
 		JWKSCacheDuration: getEnvDuration("JWKS_CACHE_DURATION", 1*time.Hour),
 
 		// Email defaults
-		SMTPHost:     getEnv("SMTP_HOST", "smtp.gmail.com"),
+		SMTPHost:     getEnv("SMTP_HOST", "localhost"),
 		SMTPPort:     smtpPort,
 		SMTPUsername: getEnv("SMTP_USERNAME", ""),
 		SMTPPassword: getEnv("SMTP_PASSWORD", ""),

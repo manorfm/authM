@@ -14,20 +14,16 @@ type ULID = ulid.ULID
 
 // User represents a user in the system
 type User struct {
-	ID                ulid.ULID  `json:"id"`
-	Name              string     `json:"name"`
-	Email             string     `json:"email"`
-	Password          string     `json:"-"` // Password is not serialized to JSON
-	Phone             string     `json:"phone"`
-	Roles             []string   `json:"roles"`
-	EmailVerified     bool       `json:"email_verified"`
-	VerificationCode  string     `json:"-"`
-	VerificationExp   time.Time  `json:"-"`
-	PasswordResetCode string     `json:"-"`
-	PasswordResetExp  time.Time  `json:"-"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
-	DeletedAt         *time.Time `json:"deleted_at,omitempty"`
+	ID            ulid.ULID  `json:"id"`
+	Name          string     `json:"name"`
+	Email         string     `json:"email"`
+	Password      string     `json:"-"` // Password is not serialized to JSON
+	Phone         string     `json:"phone"`
+	Roles         []string   `json:"roles"`
+	EmailVerified bool       `json:"email_verified"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
+	DeletedAt     *time.Time `json:"deleted_at,omitempty"`
 }
 
 // CreateUserRequest represents the request to create a new user

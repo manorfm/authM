@@ -160,6 +160,11 @@ func (m *mockUserRepository) AddRole(ctx context.Context, userID ulid.ULID, role
 	return args.Error(0)
 }
 
+func (m *mockUserRepository) UpdatePassword(ctx context.Context, userID ulid.ULID, hashedPassword string) error {
+	args := m.Called(ctx, userID, hashedPassword)
+	return args.Error(0)
+}
+
 // Mock JWT para simular chave pública inválida
 type mockJWTWithNilKey struct{}
 

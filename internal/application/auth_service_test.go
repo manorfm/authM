@@ -72,6 +72,11 @@ func (m *MockUserRepository) List(ctx context.Context, limit, offset int) ([]*do
 	return args.Get(0).([]*domain.User), args.Error(1)
 }
 
+func (m *MockUserRepository) UpdatePassword(ctx context.Context, userID ulid.ULID, hashedPassword string) error {
+	args := m.Called(ctx, userID, hashedPassword)
+	return args.Error(0)
+}
+
 type mockEmailService struct {
 	mock.Mock
 }
@@ -142,23 +147,59 @@ func (m *mockJWTService) TryVault() error {
 	return args.Error(0)
 }
 
+type mockVerificationCodeRepository struct {
+	mock.Mock
+}
+
+func (m *mockVerificationCodeRepository) Create(ctx context.Context, code *domain.VerificationCode) error {
+	args := m.Called(ctx, code)
+	return args.Error(0)
+}
+
+func (m *mockVerificationCodeRepository) FindByCode(ctx context.Context, code string) (*domain.VerificationCode, error) {
+	args := m.Called(ctx, code)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*domain.VerificationCode), args.Error(1)
+}
+
+func (m *mockVerificationCodeRepository) FindByUserIDAndType(ctx context.Context, userID ulid.ULID, codeType domain.VerificationCodeType) (*domain.VerificationCode, error) {
+	args := m.Called(ctx, userID, codeType)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*domain.VerificationCode), args.Error(1)
+}
+
+func (m *mockVerificationCodeRepository) DeleteExpired(ctx context.Context, before time.Time) error {
+	args := m.Called(ctx, before)
+	return args.Error(0)
+}
+
+func (m *mockVerificationCodeRepository) DeleteByUserIDAndType(ctx context.Context, userID ulid.ULID, codeType domain.VerificationCodeType) error {
+	args := m.Called(ctx, userID, codeType)
+	return args.Error(0)
+}
+
 func TestAuthService_Register(t *testing.T) {
 	tests := []struct {
 		name          string
 		email         string
 		password      string
-		setupMocks    func(*MockUserRepository, *mockEmailService)
+		setupMocks    func(*MockUserRepository, *mockVerificationCodeRepository, *mockEmailService)
 		expectedError error
 	}{
 		{
 			name:     "successful registration",
 			email:    "test@example.com",
 			password: "password123",
-			setupMocks: func(m *MockUserRepository, e *mockEmailService) {
+			setupMocks: func(m *MockUserRepository, v *mockVerificationCodeRepository, e *mockEmailService) {
 				m.On("ExistsByEmail", mock.Anything, "test@example.com").Return(false, nil)
 				m.On("Create", mock.Anything, mock.MatchedBy(func(user *domain.User) bool {
 					return user.Email == "test@example.com" && !user.EmailVerified
 				})).Return(nil)
+				v.On("Create", mock.Anything, mock.AnythingOfType("*domain.VerificationCode")).Return(nil)
 				e.On("SendVerificationEmail", mock.Anything, "test@example.com", mock.Anything).Return(nil)
 			},
 			expectedError: nil,
@@ -167,7 +208,7 @@ func TestAuthService_Register(t *testing.T) {
 			name:     "user already exists",
 			email:    "existing@example.com",
 			password: "password123",
-			setupMocks: func(m *MockUserRepository, e *mockEmailService) {
+			setupMocks: func(m *MockUserRepository, v *mockVerificationCodeRepository, e *mockEmailService) {
 				m.On("ExistsByEmail", mock.Anything, "existing@example.com").Return(true, nil)
 			},
 			expectedError: domain.ErrUserAlreadyExists,
@@ -176,9 +217,10 @@ func TestAuthService_Register(t *testing.T) {
 			name:     "email send failed",
 			email:    "test@example.com",
 			password: "password123",
-			setupMocks: func(m *MockUserRepository, e *mockEmailService) {
+			setupMocks: func(m *MockUserRepository, v *mockVerificationCodeRepository, e *mockEmailService) {
 				m.On("ExistsByEmail", mock.Anything, "test@example.com").Return(false, nil)
 				m.On("Create", mock.Anything, mock.Anything).Return(nil)
+				v.On("Create", mock.Anything, mock.AnythingOfType("*domain.VerificationCode")).Return(nil)
 				e.On("SendVerificationEmail", mock.Anything, "test@example.com", mock.Anything).Return(domain.ErrEmailSendFailed)
 			},
 			expectedError: domain.ErrEmailSendFailed,
@@ -188,10 +230,11 @@ func TestAuthService_Register(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockUserRepo := new(MockUserRepository)
+			mockVerificationRepo := new(mockVerificationCodeRepository)
 			mockEmailSvc := new(mockEmailService)
-			tt.setupMocks(mockUserRepo, mockEmailSvc)
+			tt.setupMocks(mockUserRepo, mockVerificationRepo, mockEmailSvc)
 
-			service := NewAuthService(mockUserRepo, nil, mockEmailSvc, zap.NewNop())
+			service := NewAuthService(mockUserRepo, mockVerificationRepo, nil, mockEmailSvc, zap.NewNop())
 			_, err := service.Register(context.Background(), "Test User", tt.email, tt.password, "1234567890")
 
 			if tt.expectedError != nil {
@@ -201,6 +244,7 @@ func TestAuthService_Register(t *testing.T) {
 			}
 
 			mockUserRepo.AssertExpectations(t)
+			mockVerificationRepo.AssertExpectations(t)
 			mockEmailSvc.AssertExpectations(t)
 		})
 	}
@@ -211,22 +255,25 @@ func TestAuthService_VerifyEmail(t *testing.T) {
 		name          string
 		email         string
 		code          string
-		setupMocks    func(*MockUserRepository)
+		setupMocks    func(*MockUserRepository, *mockVerificationCodeRepository, *mockEmailService)
 		expectedError error
 	}{
 		{
 			name:  "successful verification",
 			email: "test@example.com",
 			code:  "123456",
-			setupMocks: func(m *MockUserRepository) {
-				m.On("FindByEmail", mock.Anything, "test@example.com").Return(&domain.User{
-					Email:            "test@example.com",
-					EmailVerified:    false,
-					VerificationCode: "123456",
-					VerificationExp:  time.Now().Add(time.Hour),
-				}, nil)
+			setupMocks: func(m *MockUserRepository, v *mockVerificationCodeRepository, e *mockEmailService) {
+				user := &domain.User{
+					ID:            ulid.Make(),
+					Email:         "test@example.com",
+					EmailVerified: false,
+				}
+				m.On("FindByEmail", mock.Anything, "test@example.com").Return(user, nil)
+				verificationCode := domain.NewVerificationCode(user.ID, "123456", domain.EmailVerification, 24*time.Hour)
+				v.On("FindByUserIDAndType", mock.Anything, user.ID, domain.EmailVerification).Return(verificationCode, nil)
+				v.On("DeleteByUserIDAndType", mock.Anything, user.ID, domain.EmailVerification).Return(nil)
 				m.On("Update", mock.Anything, mock.MatchedBy(func(user *domain.User) bool {
-					return user.EmailVerified && user.VerificationCode == ""
+					return user.EmailVerified
 				})).Return(nil)
 			},
 			expectedError: nil,
@@ -235,7 +282,7 @@ func TestAuthService_VerifyEmail(t *testing.T) {
 			name:  "user not found",
 			email: "nonexistent@example.com",
 			code:  "123456",
-			setupMocks: func(m *MockUserRepository) {
+			setupMocks: func(m *MockUserRepository, v *mockVerificationCodeRepository, e *mockEmailService) {
 				m.On("FindByEmail", mock.Anything, "nonexistent@example.com").Return(nil, domain.ErrUserNotFound)
 			},
 			expectedError: domain.ErrUserNotFound,
@@ -244,13 +291,15 @@ func TestAuthService_VerifyEmail(t *testing.T) {
 			name:  "invalid code",
 			email: "test@example.com",
 			code:  "wrong",
-			setupMocks: func(m *MockUserRepository) {
-				m.On("FindByEmail", mock.Anything, "test@example.com").Return(&domain.User{
-					Email:            "test@example.com",
-					EmailVerified:    false,
-					VerificationCode: "123456",
-					VerificationExp:  time.Now().Add(time.Hour),
-				}, nil)
+			setupMocks: func(m *MockUserRepository, v *mockVerificationCodeRepository, e *mockEmailService) {
+				user := &domain.User{
+					ID:            ulid.Make(),
+					Email:         "test@example.com",
+					EmailVerified: false,
+				}
+				m.On("FindByEmail", mock.Anything, "test@example.com").Return(user, nil)
+				verificationCode := domain.NewVerificationCode(user.ID, "123456", domain.EmailVerification, 24*time.Hour)
+				v.On("FindByUserIDAndType", mock.Anything, user.ID, domain.EmailVerification).Return(verificationCode, nil)
 			},
 			expectedError: domain.ErrInvalidVerificationCode,
 		},
@@ -258,13 +307,18 @@ func TestAuthService_VerifyEmail(t *testing.T) {
 			name:  "expired code",
 			email: "test@example.com",
 			code:  "123456",
-			setupMocks: func(m *MockUserRepository) {
-				m.On("FindByEmail", mock.Anything, "test@example.com").Return(&domain.User{
-					Email:            "test@example.com",
-					EmailVerified:    false,
-					VerificationCode: "123456",
-					VerificationExp:  time.Now().Add(-time.Hour),
-				}, nil)
+			setupMocks: func(m *MockUserRepository, v *mockVerificationCodeRepository, e *mockEmailService) {
+				user := &domain.User{
+					ID:            ulid.Make(),
+					Email:         "test@example.com",
+					EmailVerified: false,
+				}
+				m.On("FindByEmail", mock.Anything, "test@example.com").Return(user, nil)
+				verificationCode := domain.NewVerificationCode(user.ID, "123456", domain.EmailVerification, -24*time.Hour)
+				v.On("FindByUserIDAndType", mock.Anything, user.ID, domain.EmailVerification).Return(verificationCode, nil)
+				v.On("DeleteByUserIDAndType", mock.Anything, user.ID, domain.EmailVerification).Return(nil)
+				v.On("Create", mock.Anything, mock.AnythingOfType("*domain.VerificationCode")).Return(nil)
+				e.On("SendVerificationEmail", mock.Anything, "test@example.com", mock.Anything).Return(nil)
 			},
 			expectedError: domain.ErrVerificationCodeExpired,
 		},
@@ -273,10 +327,11 @@ func TestAuthService_VerifyEmail(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockUserRepo := new(MockUserRepository)
+			mockVerificationRepo := new(mockVerificationCodeRepository)
 			mockEmailSvc := new(mockEmailService)
-			tt.setupMocks(mockUserRepo)
+			tt.setupMocks(mockUserRepo, mockVerificationRepo, mockEmailSvc)
 
-			service := NewAuthService(mockUserRepo, nil, mockEmailSvc, zap.NewNop())
+			service := NewAuthService(mockUserRepo, mockVerificationRepo, nil, mockEmailSvc, zap.NewNop())
 			err := service.VerifyEmail(context.Background(), tt.email, tt.code)
 
 			if tt.expectedError != nil {
@@ -286,6 +341,8 @@ func TestAuthService_VerifyEmail(t *testing.T) {
 			}
 
 			mockUserRepo.AssertExpectations(t)
+			mockVerificationRepo.AssertExpectations(t)
+			mockEmailSvc.AssertExpectations(t)
 		})
 	}
 }
@@ -294,19 +351,20 @@ func TestAuthService_RequestPasswordReset(t *testing.T) {
 	tests := []struct {
 		name          string
 		email         string
-		setupMocks    func(*MockUserRepository, *mockEmailService)
+		setupMocks    func(*MockUserRepository, *mockVerificationCodeRepository, *mockEmailService)
 		expectedError error
 	}{
 		{
 			name:  "successful request",
 			email: "test@example.com",
-			setupMocks: func(m *MockUserRepository, e *mockEmailService) {
-				m.On("FindByEmail", mock.Anything, "test@example.com").Return(&domain.User{
+			setupMocks: func(m *MockUserRepository, v *mockVerificationCodeRepository, e *mockEmailService) {
+				user := &domain.User{
+					ID:    ulid.Make(),
 					Email: "test@example.com",
-				}, nil)
-				m.On("Update", mock.Anything, mock.MatchedBy(func(user *domain.User) bool {
-					return user.PasswordResetCode != "" && !user.PasswordResetExp.IsZero()
-				})).Return(nil)
+				}
+				m.On("FindByEmail", mock.Anything, "test@example.com").Return(user, nil)
+				v.On("DeleteByUserIDAndType", mock.Anything, user.ID, domain.PasswordReset).Return(nil)
+				v.On("Create", mock.Anything, mock.AnythingOfType("*domain.VerificationCode")).Return(nil)
 				e.On("SendPasswordResetEmail", mock.Anything, "test@example.com", mock.Anything).Return(nil)
 			},
 			expectedError: nil,
@@ -314,19 +372,35 @@ func TestAuthService_RequestPasswordReset(t *testing.T) {
 		{
 			name:  "user not found",
 			email: "nonexistent@example.com",
-			setupMocks: func(m *MockUserRepository, e *mockEmailService) {
+			setupMocks: func(m *MockUserRepository, v *mockVerificationCodeRepository, e *mockEmailService) {
 				m.On("FindByEmail", mock.Anything, "nonexistent@example.com").Return(nil, domain.ErrUserNotFound)
 			},
 			expectedError: domain.ErrUserNotFound,
 		},
 		{
+			name:  "delete existing codes failed",
+			email: "test@example.com",
+			setupMocks: func(m *MockUserRepository, v *mockVerificationCodeRepository, e *mockEmailService) {
+				user := &domain.User{
+					ID:    ulid.Make(),
+					Email: "test@example.com",
+				}
+				m.On("FindByEmail", mock.Anything, "test@example.com").Return(user, nil)
+				v.On("DeleteByUserIDAndType", mock.Anything, user.ID, domain.PasswordReset).Return(domain.ErrInternal)
+			},
+			expectedError: domain.ErrInternal,
+		},
+		{
 			name:  "email send failed",
 			email: "test@example.com",
-			setupMocks: func(m *MockUserRepository, e *mockEmailService) {
-				m.On("FindByEmail", mock.Anything, "test@example.com").Return(&domain.User{
+			setupMocks: func(m *MockUserRepository, v *mockVerificationCodeRepository, e *mockEmailService) {
+				user := &domain.User{
+					ID:    ulid.Make(),
 					Email: "test@example.com",
-				}, nil)
-				m.On("Update", mock.Anything, mock.Anything).Return(nil)
+				}
+				m.On("FindByEmail", mock.Anything, "test@example.com").Return(user, nil)
+				v.On("DeleteByUserIDAndType", mock.Anything, user.ID, domain.PasswordReset).Return(nil)
+				v.On("Create", mock.Anything, mock.AnythingOfType("*domain.VerificationCode")).Return(nil)
 				e.On("SendPasswordResetEmail", mock.Anything, "test@example.com", mock.Anything).Return(domain.ErrEmailSendFailed)
 			},
 			expectedError: domain.ErrEmailSendFailed,
@@ -336,10 +410,11 @@ func TestAuthService_RequestPasswordReset(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockUserRepo := new(MockUserRepository)
+			mockVerificationRepo := new(mockVerificationCodeRepository)
 			mockEmailSvc := new(mockEmailService)
-			tt.setupMocks(mockUserRepo, mockEmailSvc)
+			tt.setupMocks(mockUserRepo, mockVerificationRepo, mockEmailSvc)
 
-			service := NewAuthService(mockUserRepo, nil, mockEmailSvc, zap.NewNop())
+			service := NewAuthService(mockUserRepo, mockVerificationRepo, nil, mockEmailSvc, zap.NewNop())
 			err := service.RequestPasswordReset(context.Background(), tt.email)
 
 			if tt.expectedError != nil {
@@ -349,6 +424,7 @@ func TestAuthService_RequestPasswordReset(t *testing.T) {
 			}
 
 			mockUserRepo.AssertExpectations(t)
+			mockVerificationRepo.AssertExpectations(t)
 			mockEmailSvc.AssertExpectations(t)
 		})
 	}
@@ -360,7 +436,7 @@ func TestAuthService_ResetPassword(t *testing.T) {
 		email         string
 		code          string
 		newPassword   string
-		setupMocks    func(*MockUserRepository)
+		setupMocks    func(*MockUserRepository, *mockVerificationCodeRepository)
 		expectedError error
 	}{
 		{
@@ -368,15 +444,16 @@ func TestAuthService_ResetPassword(t *testing.T) {
 			email:       "test@example.com",
 			code:        "123456",
 			newPassword: "newpassword123",
-			setupMocks: func(m *MockUserRepository) {
-				m.On("FindByEmail", mock.Anything, "test@example.com").Return(&domain.User{
-					Email:             "test@example.com",
-					PasswordResetCode: "123456",
-					PasswordResetExp:  time.Now().Add(time.Hour),
-				}, nil)
-				m.On("Update", mock.Anything, mock.MatchedBy(func(user *domain.User) bool {
-					return user.PasswordResetCode == "" && user.PasswordResetExp.IsZero()
-				})).Return(nil)
+			setupMocks: func(m *MockUserRepository, v *mockVerificationCodeRepository) {
+				user := &domain.User{
+					ID:    ulid.Make(),
+					Email: "test@example.com",
+				}
+				m.On("FindByEmail", mock.Anything, "test@example.com").Return(user, nil)
+				resetCode := domain.NewVerificationCode(user.ID, "123456", domain.PasswordReset, time.Hour)
+				v.On("FindByUserIDAndType", mock.Anything, user.ID, domain.PasswordReset).Return(resetCode, nil)
+				v.On("DeleteByUserIDAndType", mock.Anything, user.ID, domain.PasswordReset).Return(nil)
+				m.On("UpdatePassword", mock.Anything, user.ID, mock.Anything).Return(nil)
 			},
 			expectedError: nil,
 		},
@@ -385,57 +462,94 @@ func TestAuthService_ResetPassword(t *testing.T) {
 			email:       "nonexistent@example.com",
 			code:        "123456",
 			newPassword: "newpassword123",
-			setupMocks: func(m *MockUserRepository) {
+			setupMocks: func(m *MockUserRepository, v *mockVerificationCodeRepository) {
 				m.On("FindByEmail", mock.Anything, "nonexistent@example.com").Return(nil, domain.ErrUserNotFound)
 			},
 			expectedError: domain.ErrUserNotFound,
 		},
 		{
-			name:        "invalid code",
+			name:        "invalid reset code",
 			email:       "test@example.com",
-			code:        "wrong",
+			code:        "wrongcode",
 			newPassword: "newpassword123",
-			setupMocks: func(m *MockUserRepository) {
-				m.On("FindByEmail", mock.Anything, "test@example.com").Return(&domain.User{
-					Email:             "test@example.com",
-					PasswordResetCode: "123456",
-					PasswordResetExp:  time.Now().Add(time.Hour),
-				}, nil)
+			setupMocks: func(m *MockUserRepository, v *mockVerificationCodeRepository) {
+				user := &domain.User{
+					ID:    ulid.Make(),
+					Email: "test@example.com",
+				}
+				m.On("FindByEmail", mock.Anything, "test@example.com").Return(user, nil)
+				resetCode := domain.NewVerificationCode(user.ID, "123456", domain.PasswordReset, time.Hour)
+				v.On("FindByUserIDAndType", mock.Anything, user.ID, domain.PasswordReset).Return(resetCode, nil)
 			},
 			expectedError: domain.ErrInvalidPasswordChangeCode,
 		},
 		{
-			name:        "expired code",
+			name:        "expired reset code",
 			email:       "test@example.com",
 			code:        "123456",
 			newPassword: "newpassword123",
-			setupMocks: func(m *MockUserRepository) {
-				m.On("FindByEmail", mock.Anything, "test@example.com").Return(&domain.User{
-					Email:             "test@example.com",
-					PasswordResetCode: "123456",
-					PasswordResetExp:  time.Now().Add(-time.Hour),
-				}, nil)
+			setupMocks: func(m *MockUserRepository, v *mockVerificationCodeRepository) {
+				user := &domain.User{
+					ID:    ulid.Make(),
+					Email: "test@example.com",
+				}
+				m.On("FindByEmail", mock.Anything, "test@example.com").Return(user, nil)
+				resetCode := &domain.VerificationCode{
+					ID:        ulid.Make(),
+					UserID:    user.ID,
+					Code:      "123456",
+					Type:      domain.PasswordReset,
+					ExpiresAt: time.Now().Add(-time.Hour), // Expired
+					CreatedAt: time.Now().Add(-2 * time.Hour),
+				}
+				v.On("FindByUserIDAndType", mock.Anything, user.ID, domain.PasswordReset).Return(resetCode, nil)
+				v.On("DeleteByUserIDAndType", mock.Anything, user.ID, domain.PasswordReset).Return(nil)
 			},
 			expectedError: domain.ErrPasswordChangeCodeExpired,
+		},
+		{
+			name:        "password update fails",
+			email:       "test@example.com",
+			code:        "123456",
+			newPassword: "newpassword123",
+			setupMocks: func(m *MockUserRepository, v *mockVerificationCodeRepository) {
+				user := &domain.User{
+					ID:    ulid.Make(),
+					Email: "test@example.com",
+				}
+				m.On("FindByEmail", mock.Anything, "test@example.com").Return(user, nil)
+				resetCode := domain.NewVerificationCode(user.ID, "123456", domain.PasswordReset, time.Hour)
+				v.On("FindByUserIDAndType", mock.Anything, user.ID, domain.PasswordReset).Return(resetCode, nil)
+				v.On("DeleteByUserIDAndType", mock.Anything, user.ID, domain.PasswordReset).Return(nil)
+				m.On("UpdatePassword", mock.Anything, user.ID, mock.Anything).Return(domain.ErrDatabaseQuery)
+			},
+			expectedError: domain.ErrDatabaseQuery,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockUserRepo := new(MockUserRepository)
-			mockEmailSvc := new(mockEmailService)
-			tt.setupMocks(mockUserRepo)
+			mockVerificationRepo := new(mockVerificationCodeRepository)
+			mockJWTService := new(mockJWTService)
+			mockEmailService := new(mockEmailService)
+			logger := zap.NewNop()
 
-			service := NewAuthService(mockUserRepo, nil, mockEmailSvc, zap.NewNop())
+			tt.setupMocks(mockUserRepo, mockVerificationRepo)
+
+			service := NewAuthService(mockUserRepo, mockVerificationRepo, mockJWTService, mockEmailService, logger)
+
 			err := service.ResetPassword(context.Background(), tt.email, tt.code, tt.newPassword)
 
 			if tt.expectedError != nil {
-				assert.ErrorIs(t, err, tt.expectedError)
+				assert.Error(t, err)
+				assert.Equal(t, tt.expectedError, err)
 			} else {
 				assert.NoError(t, err)
 			}
 
 			mockUserRepo.AssertExpectations(t)
+			mockVerificationRepo.AssertExpectations(t)
 		})
 	}
 }
@@ -517,7 +631,7 @@ func TestAuthService_Login(t *testing.T) {
 			repo := new(MockUserRepository)
 			mockJWTService := new(mockJWTService)
 			mockEmailSvc := new(mockEmailService)
-			service := NewAuthService(repo, mockJWTService, mockEmailSvc, zap.NewNop())
+			service := NewAuthService(repo, nil, mockJWTService, mockEmailSvc, zap.NewNop())
 
 			tt.mockSetup(repo)
 			if tt.expectedToken != nil {
