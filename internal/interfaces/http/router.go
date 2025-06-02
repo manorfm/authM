@@ -9,6 +9,7 @@ import (
 	"github.com/ipede/user-manager-service/internal/application"
 	"github.com/ipede/user-manager-service/internal/infrastructure/config"
 	"github.com/ipede/user-manager-service/internal/infrastructure/database"
+	"github.com/ipede/user-manager-service/internal/infrastructure/email"
 	"github.com/ipede/user-manager-service/internal/infrastructure/jwt"
 	"github.com/ipede/user-manager-service/internal/infrastructure/repository"
 	"github.com/ipede/user-manager-service/internal/interfaces/http/handlers"
@@ -33,8 +34,9 @@ func NewRouter(
 	authMiddleware := auth.NewAuthMiddleware(jwtService, logger)
 	userRepo := repository.NewUserRepository(db, logger)
 	oauthRepo := repository.NewOAuth2Repository(db, logger)
+	emailService := email.NewEmailService(cfg, logger)
 	userService := application.NewUserService(userRepo, logger)
-	authService := application.NewAuthService(userRepo, jwtService, logger)
+	authService := application.NewAuthService(userRepo, jwtService, emailService, logger)
 	oauth2Service := application.NewOAuth2Service(oauthRepo, logger)
 	oidcService := application.NewOIDCService(oauth2Service, jwtService, userRepo, cfg, logger)
 
@@ -65,6 +67,9 @@ func NewRouter(
 	router.Group(func(r chi.Router) {
 		r.Post("/register", authHandler.RegisterHandler)
 		r.Post("/auth/login", authHandler.LoginHandler)
+		r.Post("/auth/verify-email", authHandler.VerifyEmailHandler)
+		r.Post("/auth/request-password-reset", authHandler.RequestPasswordResetHandler)
+		r.Post("/auth/reset-password", authHandler.ResetPasswordHandler)
 	})
 
 	// OIDC routes

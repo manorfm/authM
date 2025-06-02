@@ -39,6 +39,13 @@ type Config struct {
 
 	// Server URL
 	ServerURL string
+
+	// Email configuration
+	SMTPHost     string
+	SMTPPort     int
+	SMTPUsername string
+	SMTPPassword string
+	SMTPFrom     string
 }
 
 // NewConfig creates a new configuration with default values
@@ -90,6 +97,11 @@ func LoadConfig() (*Config, error) {
 		return nil, err
 	}
 
+	smtpPort, err := strconv.Atoi(getEnv("SMTP_PORT", "587"))
+	if err != nil {
+		return nil, err
+	}
+
 	return &Config{
 		// Database defaults
 		DBHost:     getEnv("DB_HOST", "localhost"),
@@ -120,6 +132,13 @@ func LoadConfig() (*Config, error) {
 
 		// JWKS cache duration
 		JWKSCacheDuration: getEnvDuration("JWKS_CACHE_DURATION", 1*time.Hour),
+
+		// Email defaults
+		SMTPHost:     getEnv("SMTP_HOST", "smtp.gmail.com"),
+		SMTPPort:     smtpPort,
+		SMTPUsername: getEnv("SMTP_USERNAME", ""),
+		SMTPPassword: getEnv("SMTP_PASSWORD", ""),
+		SMTPFrom:     getEnv("SMTP_FROM", "noreply@example.com"),
 	}, nil
 }
 

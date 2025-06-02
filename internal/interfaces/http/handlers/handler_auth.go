@@ -117,3 +117,90 @@ func pascalToCamel(str string) string {
 	// Converte a primeira letra para minúscula
 	return strings.ToLower(string(str[0])) + str[1:]
 }
+
+type VerifyEmailRequest struct {
+	Email string `json:"email" validate:"required,email"`
+	Code  string `json:"code" validate:"required"`
+}
+
+type RequestPasswordResetRequest struct {
+	Email string `json:"email" validate:"required,email"`
+}
+
+type ResetPasswordRequest struct {
+	Email       string `json:"email" validate:"required,email"`
+	Code        string `json:"code" validate:"required"`
+	NewPassword string `json:"new_password" validate:"required,min=8"`
+}
+
+func (h *HandlerAuth) VerifyEmailHandler(w http.ResponseWriter, r *http.Request) {
+	var req VerifyEmailRequest
+
+	defer r.Body.Close()
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		errors.RespondWithError(w, domain.ErrInvalidRequestBody)
+		return
+	}
+
+	var validate = validator.New()
+	if err := validate.Struct(req); err != nil {
+		createErrorMessage(w, err)
+		return
+	}
+
+	if err := h.authService.VerifyEmail(r.Context(), req.Email, req.Code); err != nil {
+		h.logger.Error("failed to verify email", zap.Error(err))
+		errors.RespondWithError(w, err.(*domain.BusinessError))
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func (h *HandlerAuth) RequestPasswordResetHandler(w http.ResponseWriter, r *http.Request) {
+	var req RequestPasswordResetRequest
+
+	defer r.Body.Close()
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		errors.RespondWithError(w, domain.ErrInvalidRequestBody)
+		return
+	}
+
+	var validate = validator.New()
+	if err := validate.Struct(req); err != nil {
+		createErrorMessage(w, err)
+		return
+	}
+
+	if err := h.authService.RequestPasswordReset(r.Context(), req.Email); err != nil {
+		h.logger.Error("failed to request password reset", zap.Error(err))
+		errors.RespondWithError(w, err.(*domain.BusinessError))
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func (h *HandlerAuth) ResetPasswordHandler(w http.ResponseWriter, r *http.Request) {
+	var req ResetPasswordRequest
+
+	defer r.Body.Close()
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		errors.RespondWithError(w, domain.ErrInvalidRequestBody)
+		return
+	}
+
+	var validate = validator.New()
+	if err := validate.Struct(req); err != nil {
+		createErrorMessage(w, err)
+		return
+	}
+
+	if err := h.authService.ResetPassword(r.Context(), req.Email, req.Code, req.NewPassword); err != nil {
+		h.logger.Error("failed to reset password", zap.Error(err))
+		errors.RespondWithError(w, err.(*domain.BusinessError))
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}

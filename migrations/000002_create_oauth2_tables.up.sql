@@ -15,6 +15,9 @@ CREATE TABLE authorization_codes (
     client_id VARCHAR(255) NOT NULL REFERENCES oauth2_clients(id) ON DELETE CASCADE,
     user_id VARCHAR(255) NOT NULL,
     scopes TEXT[] NOT NULL,
+    code_challenge VARCHAR(255),
+    code_challenge_method VARCHAR(32),
+    code_verifier VARCHAR(255),
     expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL
 );

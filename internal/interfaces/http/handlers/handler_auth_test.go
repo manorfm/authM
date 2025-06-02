@@ -36,6 +36,21 @@ func (m *mockAuthService) Login(ctx context.Context, email, password string) (*d
 	return args.Get(0).(*domain.TokenPair), args.Error(1)
 }
 
+func (m *mockAuthService) RequestPasswordReset(ctx context.Context, email string) error {
+	args := m.Called(ctx, email)
+	return args.Error(0)
+}
+
+func (m *mockAuthService) ResetPassword(ctx context.Context, email, code, newPassword string) error {
+	args := m.Called(ctx, email, code, newPassword)
+	return args.Error(0)
+}
+
+func (m *mockAuthService) VerifyEmail(ctx context.Context, email, code string) error {
+	args := m.Called(ctx, email, code)
+	return args.Error(0)
+}
+
 func TestAuthHandler_Register(t *testing.T) {
 	tests := []struct {
 		name           string

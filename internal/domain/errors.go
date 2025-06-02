@@ -133,6 +133,24 @@ var (
 
 	// ErrInvalidCodeChallenge is returned when the code challenge is invalid
 	ErrInvalidCodeChallenge = NewBusinessError("U0033", "Invalid code challenge")
+
+	// ErrEmailNotVerified is returned when the email is not verified
+	ErrEmailNotVerified = NewBusinessError("U0034", "Email not verified")
+
+	// ErrInvalidVerificationCode is returned when the verification code is invalid
+	ErrInvalidVerificationCode = NewBusinessError("U0035", "Invalid verification code")
+
+	// ErrVerificationCodeExpired is returned when the verification code is expired
+	ErrVerificationCodeExpired = NewBusinessError("U0036", "Verification code expired")
+
+	// ErrInvalidPasswordChangeCode is returned when the password change code is invalid
+	ErrInvalidPasswordChangeCode = NewBusinessError("U0037", "Invalid password change code")
+
+	// ErrPasswordChangeCodeExpired is returned when the password change code is expired
+	ErrPasswordChangeCodeExpired = NewBusinessError("U0038", "Password change code expired")
+
+	// ErrEmailSendFailed is returned when sending email fails
+	ErrEmailSendFailed = NewInfraError("U0039", "Failed to send email")
 )
 
 func (e *BusinessError) GetCode() string {
