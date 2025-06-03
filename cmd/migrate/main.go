@@ -22,6 +22,7 @@ func main() {
 	down := flag.Bool("down", false, "Run migrations down")
 	steps := flag.Int("steps", 0, "Number of steps to migrate (positive for up, negative for down)")
 	force := flag.String("force", "", "Force migration to specific version")
+	migrationDir := flag.String("dir", "migrations/up", "Migration directory path")
 	flag.Parse()
 
 	// Load configuration
@@ -62,7 +63,7 @@ func main() {
 
 	// Create migration instance
 	m, err := migrate.New(
-		fmt.Sprintf("file://%s/migrations", cwd),
+		fmt.Sprintf("file://%s/%s", cwd, *migrationDir),
 		dbURL,
 	)
 	if err != nil {
@@ -72,7 +73,7 @@ func main() {
 
 	// Add logging for migration files
 	logger.Info("Migration files found",
-		zap.String("path", fmt.Sprintf("%s/migrations", cwd)),
+		zap.String("path", fmt.Sprintf("%s/%s", cwd, *migrationDir)),
 		zap.String("dbURL", dbURL),
 	)
 
