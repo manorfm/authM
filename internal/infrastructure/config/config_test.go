@@ -4,6 +4,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 func TestLoadConfig(t *testing.T) {
@@ -45,6 +47,27 @@ func TestLoadConfig(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "invalid server port",
+			setup: func() {
+				os.Setenv("PORT", "invalid")
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid rsa key size",
+			setup: func() {
+				os.Setenv("RSA_KEY_SIZE", "invalid")
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid smtp port",
+			setup: func() {
+				os.Setenv("SMTP_PORT", "invalid")
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -53,11 +76,14 @@ func TestLoadConfig(t *testing.T) {
 			os.Setenv("DB_PORT", "5432")
 			os.Setenv("JWT_ACCESS_TOKEN_DURATION", "15m")
 			os.Setenv("JWT_REFRESH_TOKEN_DURATION", "24h")
+			os.Setenv("PORT", "8080")
+			os.Setenv("RSA_KEY_SIZE", "2048")
+			os.Setenv("SMTP_PORT", "1025")
 
 			// Run test-specific setup
 			tt.setup()
 
-			cfg, err := LoadConfig()
+			cfg, err := LoadConfig(zap.NewNop())
 			if (err != nil) != tt.wantErr {
 				t.Errorf("LoadConfig() error = %v, wantErr %v", err, tt.wantErr)
 				return

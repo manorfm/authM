@@ -151,6 +151,12 @@ var (
 
 	// ErrEmailSendFailed is returned when sending email fails
 	ErrEmailSendFailed = NewInfraError("U0039", "Failed to send email")
+
+	// ErrMissingSMTPConfiguration is returned when the email is invalid
+	ErrMissingSMTPConfiguration = NewBusinessError("U0040", "missing necessary SMTP configuration")
+
+	// ErrInvalidEmail is returned when the email is invalid
+	ErrInvalidEmail = NewBusinessError("U0041", "invalid email address")
 )
 
 func (e *BusinessError) GetCode() string {

@@ -1,148 +1,134 @@
 package config
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"strconv"
 	"time"
 
 	"github.com/joho/godotenv"
+	"go.uber.org/zap"
 )
 
-// Config holds the application configuration
 type Config struct {
-	// Database configuration
 	DBHost     string
 	DBPort     int
 	DBUser     string
 	DBPassword string
 	DBName     string
 
-	// JWT configuration
 	JWTAccessDuration  time.Duration
 	JWTRefreshDuration time.Duration
 	JWTKeyPath         string
 
-	// Vault configuration
+	EnableVault    bool
 	VaultAddress   string
 	VaultToken     string
 	VaultMountPath string
 	VaultKeyName   string
 
-	// Server configuration
-	ServerPort int
-
-	// RSA key size
-	RSAKeySize int
-
-	// JWKS cache duration
+	ServerPort        int
+	ServerURL         string
+	RSAKeySize        int
 	JWKSCacheDuration time.Duration
 
-	// Server URL
-	ServerURL string
-
-	// Email configuration
-	SMTPHost     string
-	SMTPPort     int
-	SMTPUsername string
-	SMTPPassword string
-	SMTPFrom     string
+	SMTPHost           string
+	SMTPPort           int
+	SMTPUsername       string
+	SMTPPassword       string
+	SMTPFrom           string
+	SMTPAuthValidation bool
 }
 
-// NewConfig creates a new configuration with default values
-func NewConfig() *Config {
-	return &Config{
-		// Database defaults
-		DBHost:     "",
-		DBPort:     5432,
-		DBUser:     "",
-		DBPassword: "",
-		DBName:     "",
-
-		// JWT defaults
-		JWTAccessDuration:  time.Duration(15 * time.Minute),
-		JWTRefreshDuration: time.Duration(24 * time.Hour),
-		JWTKeyPath:         "",
-
-		// Vault defaults
-		VaultAddress:   "http://localhost:8200",
-		VaultToken:     "",
-		VaultMountPath: "transit",
-		VaultKeyName:   "jwt-signing-key",
-
-		// Server defaults
-		ServerPort: 8080,
-
-		// Server URL
-		ServerURL: "http://localhost:8080",
-	}
-}
-
-// LoadConfig loads configuration from environment variables
-func LoadConfig() (*Config, error) {
-	// Load .env from project root
-	_ = godotenv.Load()
-
-	dbPort, err := strconv.Atoi(getEnv("DB_PORT", "5432"))
-	if err != nil {
-		return nil, err
+// LoadConfig loads configuration from environment variables, logging with zap
+func LoadConfig(logger *zap.Logger) (*Config, error) {
+	if err := godotenv.Load(); err != nil {
+		logger.Warn("No .env file found, relying on system environment")
 	}
 
-	accessDuration, err := time.ParseDuration(getEnv("JWT_ACCESS_TOKEN_DURATION", "15m"))
-	if err != nil {
-		return nil, err
+	getInt := func(key string, defaultVal int) (int, error) {
+		valStr := getEnv(key, "")
+		if valStr == "" {
+			logger.Info("Using default value", zap.String("key", key), zap.Int("default", defaultVal))
+			return defaultVal, nil
+		}
+		val, err := strconv.Atoi(valStr)
+		if err != nil {
+			return 0, fmt.Errorf("invalid int value for %s: %w", key, err)
+		}
+		return val, nil
 	}
 
-	refreshDuration, err := time.ParseDuration(getEnv("JWT_REFRESH_TOKEN_DURATION", "24h"))
-	if err != nil {
-		return nil, err
+	getDuration := func(key string, defaultVal time.Duration) (time.Duration, error) {
+		valStr := getEnv(key, "")
+		if valStr == "" {
+			logger.Info("Using default duration", zap.String("key", key), zap.String("default", defaultVal.String()))
+			return defaultVal, nil
+		}
+		val, err := time.ParseDuration(valStr)
+		if err != nil {
+			return 0, fmt.Errorf("invalid duration value for %s: %w", key, err)
+		}
+		return val, nil
 	}
 
-	smtpPort, err := strconv.Atoi(getEnv("SMTP_PORT", "1025"))
-	if err != nil {
-		return nil, err
-	}
-
-	return &Config{
-		// Database defaults
+	cfg := &Config{
 		DBHost:     getEnv("DB_HOST", "localhost"),
-		DBPort:     dbPort,
 		DBUser:     getEnv("DB_USER", "owner"),
 		DBPassword: getEnv("DB_PASSWORD", "ownerTest"),
 		DBName:     getEnv("DB_NAME", "users"),
 
-		// JWT defaults
-		JWTAccessDuration:  accessDuration,
-		JWTRefreshDuration: refreshDuration,
-		JWTKeyPath:         getEnv("JWT_KEY_PATH", ""),
+		JWTKeyPath: getEnv("JWT_KEY_PATH", ""),
 
-		// Vault defaults
+		EnableVault:    getEnv("ENABLE_VAULT", "true") == "true",
 		VaultAddress:   getEnv("VAULT_ADDRESS", "http://localhost:8200"),
 		VaultToken:     getEnv("VAULT_TOKEN", ""),
-		VaultMountPath: getEnv("VAULT_MOUNT_PATH", "transit"),
+		VaultMountPath: getEnv("VAULT_MOUNT_PATH", "transit/user-manager-service"),
 		VaultKeyName:   getEnv("VAULT_KEY_NAME", "jwt-signing-key"),
 
-		// Server defaults
-		ServerPort: getEnvInt("PORT", 8080),
-
-		// Server URL
 		ServerURL: getEnv("SERVER_URL", "http://localhost:8080"),
 
-		// RSA key size
-		RSAKeySize: getEnvInt("RSA_KEY_SIZE", 2048),
+		SMTPHost:           getEnv("SMTP_HOST", "localhost"),
+		SMTPUsername:       getEnv("SMTP_USERNAME", ""),
+		SMTPPassword:       getEnv("SMTP_PASSWORD", ""),
+		SMTPFrom:           getEnv("SMTP_FROM", "noreply@example.com"),
+		SMTPAuthValidation: getEnv("SMTP_AUTH_VALIDATION", "true") == "true",
+	}
 
-		// JWKS cache duration
-		JWKSCacheDuration: getEnvDuration("JWKS_CACHE_DURATION", 1*time.Hour),
+	// Load numeric and duration values with error handling
+	var err error
+	if cfg.DBPort, err = getInt("DB_PORT", 5432); err != nil {
+		return nil, err
+	}
+	if cfg.JWTAccessDuration, err = getDuration("JWT_ACCESS_TOKEN_DURATION", 15*time.Minute); err != nil {
+		return nil, err
+	}
+	if cfg.JWTRefreshDuration, err = getDuration("JWT_REFRESH_TOKEN_DURATION", 24*time.Hour); err != nil {
+		return nil, err
+	}
+	if cfg.ServerPort, err = getInt("PORT", 8080); err != nil {
+		return nil, err
+	}
+	if cfg.RSAKeySize, err = getInt("RSA_KEY_SIZE", 2048); err != nil {
+		return nil, err
+	}
+	if cfg.JWKSCacheDuration, err = getDuration("JWKS_CACHE_DURATION", time.Hour); err != nil {
+		return nil, err
+	}
+	if cfg.SMTPPort, err = getInt("SMTP_PORT", 1025); err != nil {
+		return nil, err
+	}
 
-		// Email defaults
-		SMTPHost:     getEnv("SMTP_HOST", "localhost"),
-		SMTPPort:     smtpPort,
-		SMTPUsername: getEnv("SMTP_USERNAME", ""),
-		SMTPPassword: getEnv("SMTP_PASSWORD", ""),
-		SMTPFrom:     getEnv("SMTP_FROM", "noreply@example.com"),
-	}, nil
+	if err := cfg.Validate(); err != nil {
+		logger.Error("Invalid configuration", zap.Error(err))
+		return nil, err
+	}
+
+	logger.Info("Configuration loaded successfully")
+	return cfg, nil
 }
 
-// getEnv gets an environment variable or returns a default value
 func getEnv(key, defaultValue string) string {
 	if value, exists := os.LookupEnv(key); exists {
 		return value
@@ -150,23 +136,22 @@ func getEnv(key, defaultValue string) string {
 	return defaultValue
 }
 
-// getEnvInt gets an environment variable as an integer or returns a default value
-func getEnvInt(key string, defaultValue int) int {
-	if value, exists := os.LookupEnv(key); exists {
-		intValue, err := strconv.Atoi(value)
-		if err == nil {
-			return intValue
-		}
+// Validate ensures configuration values are valid
+func (c *Config) Validate() error {
+	if c.JWTAccessDuration <= 0 {
+		return errors.New("JWTAccessDuration must be positive")
 	}
-	return defaultValue
-}
-
-func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
-	if value, exists := os.LookupEnv(key); exists {
-		duration, err := time.ParseDuration(value)
-		if err == nil {
-			return duration
-		}
+	if c.JWTRefreshDuration <= 0 {
+		return errors.New("JWTRefreshDuration must be positive")
 	}
-	return defaultValue
+	if c.ServerPort <= 0 || c.ServerPort > 65535 {
+		return fmt.Errorf("ServerPort must be valid: got %d", c.ServerPort)
+	}
+	if c.SMTPPort <= 0 || c.SMTPPort > 65535 {
+		return fmt.Errorf("SMTPPort must be valid: got %d", c.SMTPPort)
+	}
+	if c.RSAKeySize < 2048 {
+		return fmt.Errorf("RSAKeySize must be at least 2048 bits: got %d", c.RSAKeySize)
+	}
+	return nil
 }

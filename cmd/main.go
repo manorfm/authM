@@ -24,18 +24,18 @@ import (
 // @in header
 // @name Authorization
 func main() {
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
-		os.Exit(1)
-	}
-
 	logger, err := zap.NewProduction()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
 		os.Exit(1)
 	}
 	defer logger.Sync()
+
+	cfg, err := config.LoadConfig(logger)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		os.Exit(1)
+	}
 
 	ctx := context.Background()
 

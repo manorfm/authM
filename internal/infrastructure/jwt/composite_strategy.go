@@ -41,7 +41,7 @@ func NewCompositeStrategy(cfg *config.Config, logger *zap.Logger) domain.JWTStra
 		vaultStrategy: vaultStrategy,
 		localStrategy: localStrategy,
 		logger:        logger,
-		useVault:      true, // Start with Vault strategy
+		useVault:      cfg.EnableVault,
 	}
 }
 

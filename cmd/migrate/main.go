@@ -25,18 +25,18 @@ func main() {
 	migrationDir := flag.String("dir", "migrations/up", "Migration directory path")
 	flag.Parse()
 
-	// Load configuration
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
-	}
-
 	// Initialize logger
 	logger, err := zap.NewProduction()
 	if err != nil {
 		log.Fatalf("Failed to initialize logger: %v", err)
 	}
 	defer logger.Sync()
+
+	// Load configuration
+	cfg, err := config.LoadConfig(logger)
+	if err != nil {
+		log.Fatalf("Failed to load config: %v", err)
+	}
 
 	// Create database connection
 	ctx := context.Background()

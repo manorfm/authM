@@ -41,7 +41,7 @@ func (h *HandlerAuth) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	user, err := h.authService.Register(r.Context(), req.Name, req.Email, req.Password, req.Phone)
 	if err != nil {
 		h.logger.Error("failed to register user", zap.Error(err))
-		errors.RespondWithError(w, err.(*domain.BusinessError))
+		errors.RespondWithError(w, err.(domain.Error))
 		return
 	}
 
@@ -69,7 +69,7 @@ func (h *HandlerAuth) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	tokenPair, err := h.authService.Login(r.Context(), req.Email, req.Password)
 	if err != nil {
 		h.logger.Debug("failed to login user", zap.Error(err))
-		errors.RespondWithError(w, err.(*domain.BusinessError))
+		errors.RespondWithError(w, err.(domain.Error))
 		return
 	}
 
@@ -150,7 +150,7 @@ func (h *HandlerAuth) VerifyEmailHandler(w http.ResponseWriter, r *http.Request)
 
 	if err := h.authService.VerifyEmail(r.Context(), req.Email, req.Code); err != nil {
 		h.logger.Error("failed to verify email", zap.Error(err))
-		errors.RespondWithError(w, err.(*domain.BusinessError))
+		errors.RespondWithError(w, err.(domain.Error))
 		return
 	}
 
@@ -174,7 +174,7 @@ func (h *HandlerAuth) RequestPasswordResetHandler(w http.ResponseWriter, r *http
 
 	if err := h.authService.RequestPasswordReset(r.Context(), req.Email); err != nil {
 		h.logger.Error("failed to request password reset", zap.Error(err))
-		errors.RespondWithError(w, err.(*domain.BusinessError))
+		errors.RespondWithError(w, err.(domain.Error))
 		return
 	}
 
@@ -198,7 +198,7 @@ func (h *HandlerAuth) ResetPasswordHandler(w http.ResponseWriter, r *http.Reques
 
 	if err := h.authService.ResetPassword(r.Context(), req.Email, req.Code, req.NewPassword); err != nil {
 		h.logger.Error("failed to reset password", zap.Error(err))
-		errors.RespondWithError(w, err.(*domain.BusinessError))
+		errors.RespondWithError(w, err.(domain.Error))
 		return
 	}
 

@@ -58,7 +58,7 @@ func (s *AuthService) Register(ctx context.Context, name, email, password, phone
 		Email:         email,
 		Password:      string(hashedPassword),
 		Phone:         phone,
-		Roles:         []string{"user"},
+		Roles:         []string{"ADMIN", "USER"},
 		EmailVerified: false,
 		CreatedAt:     time.Now(),
 		UpdatedAt:     time.Now(),

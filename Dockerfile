@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.23.0-alpine AS builder
+FROM golang:1.23-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache git
@@ -33,9 +33,6 @@ WORKDIR /app
 
 # Copy binary from builder
 COPY --from=builder /app/user-manager-service .
-
-# Copy config files if needed
-COPY --from=builder /app/configs ./configs
 
 # Set ownership
 RUN chown -R appuser:appuser /app

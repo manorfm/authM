@@ -55,11 +55,6 @@ services:
       - ./migrations/up:/docker-entrypoint-initdb.d
     networks:
       - user-manager-network
-    # healthcheck:
-    #   test: ["CMD-SHELL", "pg_isready -U postgres"]
-    #   interval: 5s
-    #   timeout: 5s
-    #   retries: 5
     restart: unless-stopped
 
   vault:

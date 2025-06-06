@@ -371,8 +371,11 @@ func TestOIDCService_GetUserInfo(t *testing.T) {
 			mockUserRepo := new(mockUserRepository)
 			mockOAuth2Service := new(mockOAuth2Service)
 			tt.mockSetup(mockUserRepo)
-
-			service := NewOIDCService(mockOAuth2Service, nil, mockUserRepo, config.NewConfig(), zap.NewNop())
+			cfg, err := config.LoadConfig(zap.NewNop())
+			if err != nil {
+				t.Fatalf("Failed to load config: %v", err)
+			}
+			service := NewOIDCService(mockOAuth2Service, nil, mockUserRepo, cfg, zap.NewNop())
 
 			info, err := service.GetUserInfo(context.Background(), tt.userID.String())
 
@@ -525,7 +528,11 @@ func TestOIDCService_Authorize(t *testing.T) {
 			mockOAuth2 := new(mockOAuth2Service)
 			tt.setupMocks(mockOAuth2)
 
-			service := NewOIDCService(mockOAuth2, nil, nil, &config.Config{}, zap.NewNop())
+			cfg, err := config.LoadConfig(zap.NewNop())
+			if err != nil {
+				t.Fatalf("Failed to load config: %v", err)
+			}
+			service := NewOIDCService(mockOAuth2, nil, nil, cfg, zap.NewNop())
 			code, err := service.Authorize(tt.setupCtx(context.Background()), tt.clientID, tt.redirectURI, tt.state, tt.scope)
 
 			if tt.wantErr != nil {
@@ -592,7 +599,11 @@ func TestOIDCService_ExchangeCode(t *testing.T) {
 				}, nil)
 			}
 
-			service := NewOIDCService(mockOAuth2Service, mockJWT, mockUserRepo, config.NewConfig(), logger)
+			cfg, err := config.LoadConfig(logger)
+			if err != nil {
+				t.Fatalf("Failed to load config: %v", err)
+			}
+			service := NewOIDCService(mockOAuth2Service, mockJWT, mockUserRepo, cfg, logger)
 
 			token, err := service.ExchangeCode(context.Background(), tt.code, tt.codeVerifier)
 
@@ -653,8 +664,12 @@ func TestOIDCService_GetOpenIDConfiguration(t *testing.T) {
 			tt.mockSetup(mockOAuth2Service)
 
 			var cfg *config.Config
+			var err error
 			if tt.name != "nil configuration" {
-				cfg = config.NewConfig()
+				cfg, err = config.LoadConfig(zap.NewNop())
+				if err != nil {
+					t.Fatalf("Failed to load config: %v", err)
+				}
 			}
 
 			service := NewOIDCService(mockOAuth2Service, nil, nil, cfg, zap.NewNop())
@@ -759,7 +774,11 @@ func TestOIDCService_RefreshToken(t *testing.T) {
 			}
 			tt.mockSetup(mockUserRepo, jwtService)
 
-			service := NewOIDCService(mockOAuth2Service, jwtService, mockUserRepo, config.NewConfig(), logger)
+			cfg, err := config.LoadConfig(logger)
+			if err != nil {
+				t.Fatalf("Failed to load config: %v", err)
+			}
+			service := NewOIDCService(mockOAuth2Service, jwtService, mockUserRepo, cfg, logger)
 
 			token, err := service.RefreshToken(context.Background(), tt.refreshToken)
 
