@@ -97,10 +97,10 @@ func TestAuthMiddleware_Authenticator(t *testing.T) {
 			name:  "invalid token",
 			token: "invalid-token",
 			mockSetup: func(m *MockJWT) {
-				m.On("ValidateToken", "invalid-token").Return(nil, assert.AnError)
+				m.On("ValidateToken", "invalid-token").Return(nil, domain.ErrInvalidToken)
 			},
 			expectedStatus: http.StatusForbidden,
-			expectedBody:   `{"code":"U0018","message":"Forbidden"}`,
+			expectedBody:   `{"code":"U0019","message":"Invalid token"}`,
 		},
 		{
 			name:  "valid token",

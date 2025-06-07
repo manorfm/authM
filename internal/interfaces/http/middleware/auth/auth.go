@@ -30,7 +30,7 @@ func (m *AuthMiddleware) Authenticator(next http.Handler) http.Handler {
 		claims, err := m.jwt.ValidateToken(token)
 		if err != nil {
 			m.logger.Error("Failed to validate token", zap.Error(err))
-			httperrors.RespondWithError(w, domain.ErrForbidden)
+			httperrors.RespondWithError(w, err.(domain.Error))
 			return
 		}
 

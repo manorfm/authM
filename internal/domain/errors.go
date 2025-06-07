@@ -157,6 +157,15 @@ var (
 
 	// ErrInvalidEmail is returned when the email is invalid
 	ErrInvalidEmail = NewBusinessError("U0041", "invalid email address")
+
+	// ErrTokenSignatureInvalid is returned when the token signature is invalid
+	ErrTokenSignatureInvalid = NewBusinessError("U0042", "Token signature is invalid")
+
+	// ErrTokenMalformed is returned when the token is malformed
+	ErrTokenMalformed = NewBusinessError("U0043", "Token malformed")
+
+	// ErrTokenHasNoRoles is returned when the token has no roles
+	ErrTokenHasNoRoles = NewBusinessError("U0044", "Token has no roles")
 )
 
 func (e *BusinessError) GetCode() string {

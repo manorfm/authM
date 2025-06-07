@@ -33,7 +33,7 @@ func getStatus(err domain.Error) int {
 	case domain.ErrForbidden.GetCode():
 		return http.StatusForbidden
 	case domain.ErrInvalidToken.GetCode():
-		return http.StatusUnauthorized
+		return http.StatusForbidden
 	}
 	return http.StatusBadRequest
 }

@@ -8,7 +8,6 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -209,18 +208,18 @@ func (l *localStrategy) Verify(tokenString string) (*domain.Claims, error) {
 			return nil, domain.ErrTokenExpired
 		}
 		if errors.Is(err, jwt.ErrTokenMalformed) {
-			return nil, fmt.Errorf("invalid token: %w", err)
+			return nil, domain.ErrTokenMalformed
 		}
 		if errors.Is(err, jwt.ErrTokenSignatureInvalid) {
-			return nil, fmt.Errorf("invalid token: %w", err)
+			return nil, domain.ErrTokenSignatureInvalid
 		}
-		return nil, fmt.Errorf("invalid token: %w", err)
+		return nil, domain.ErrInvalidToken
 	}
 
 	// Check if token is valid
 	if !token.Valid {
-		l.logger.Error("Invalid token")
-		return nil, fmt.Errorf("invalid token: token validation failed")
+		l.logger.Error("Invalid token: token validation failed")
+		return nil, domain.ErrInvalidToken
 	}
 
 	// Get claims
