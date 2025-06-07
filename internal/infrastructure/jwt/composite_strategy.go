@@ -25,10 +25,15 @@ type compositeStrategy struct {
 func NewCompositeStrategy(cfg *config.Config, logger *zap.Logger) domain.JWTStrategy {
 	// Create JWT configuration
 
-	vaultStrategy, err := NewVaultStrategy(cfg, logger)
-	if err != nil {
-		logger.Warn("Failed to create Vault strategy, falling back to local strategy",
-			zap.Error(err))
+	var vaultStrategy domain.JWTStrategy
+	var err error
+
+	if cfg.EnableVault {
+		vaultStrategy, err = NewVaultStrategy(cfg, logger)
+		if err != nil {
+			logger.Warn("Failed to create Vault strategy, falling back to local strategy",
+				zap.Error(err))
+		}
 	}
 
 	// Create local strategy
