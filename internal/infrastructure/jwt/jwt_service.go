@@ -167,6 +167,10 @@ func (j *jwtService) GenerateTokenPair(userID ulid.ULID, roles []string) (*domai
 	j.mu.RLock()
 	defer j.mu.RUnlock()
 
+	if len(roles) == 0 {
+		return nil, domain.ErrTokenHasNoRoles
+	}
+
 	// Generate access token
 	accessTokenID := ulid.Make().String()
 	accessClaims := domain.Claims{

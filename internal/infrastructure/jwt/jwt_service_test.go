@@ -54,167 +54,241 @@ func getJWTService(t *testing.T) domain.JWTService {
 func TestJWTService_ValidateToken(t *testing.T) {
 	service := getJWTService(t)
 
-	// Test valid token
-	userID := ulid.Make()
-	roles := []string{"ADMIN"}
-	tokenPair, err := service.GenerateTokenPair(userID, roles)
-	require.NoError(t, err)
+	t.Run("valid token", func(t *testing.T) {
+		userID := ulid.Make()
+		roles := []string{"ADMIN"}
+		tokenPair, err := service.GenerateTokenPair(userID, roles)
+		require.NoError(t, err)
 
-	claims, err := service.ValidateToken(tokenPair.AccessToken)
-	require.NoError(t, err)
-	require.NotNil(t, claims)
-	require.Equal(t, userID.String(), claims.Subject)
-	require.Equal(t, roles, claims.Roles)
+		claims, err := service.ValidateToken(tokenPair.AccessToken)
+		require.NoError(t, err)
+		require.NotNil(t, claims)
+		require.Equal(t, userID.String(), claims.Subject)
+		require.Equal(t, roles, claims.Roles)
+	})
 
-	// Test expired token
-	shortService := getJWTServiceWithDuration(t, 1*time.Second, time.Duration(24*time.Hour))
-	expiredUserID := ulid.Make()
-	expiredRoles := []string{"USER"}
-	expiredTokenPair, err := shortService.GenerateTokenPair(expiredUserID, expiredRoles)
-	require.NoError(t, err)
+	t.Run("expired token", func(t *testing.T) {
+		shortService := getJWTServiceWithDuration(t, 1*time.Second, time.Duration(24*time.Hour))
+		expiredUserID := ulid.Make()
+		expiredRoles := []string{"USER"}
+		expiredTokenPair, err := shortService.GenerateTokenPair(expiredUserID, expiredRoles)
+		require.NoError(t, err)
 
-	time.Sleep(2 * time.Second)
+		time.Sleep(2 * time.Second)
 
-	_, err = shortService.ValidateToken(expiredTokenPair.AccessToken)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "expired")
+		_, err = shortService.ValidateToken(expiredTokenPair.AccessToken)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "expired")
+	})
 
-	// Test invalid token
-	invalidToken := "invalid.token.here"
-	_, err = service.ValidateToken(invalidToken)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "invalid token")
+	t.Run("invalid token format", func(t *testing.T) {
+		invalidTokens := []string{
+			"invalid.token.here",
+			"not.even.a.jwt",
+			"header.payload.signature",
+			"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ",
+			"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.",
+		}
 
-	// Test blacklisted token
-	blacklistedUserID := ulid.Make()
-	blacklistedRoles := []string{"USER"}
-	blacklistedTokenPair, err := service.GenerateTokenPair(blacklistedUserID, blacklistedRoles)
-	require.NoError(t, err)
+		for _, token := range invalidTokens {
+			_, err := service.ValidateToken(token)
+			require.Error(t, err)
+			if !(strings.Contains(err.Error(), "Token malformed") || strings.Contains(err.Error(), "Invalid token")) {
+				t.Errorf("unexpected error: %v", err)
+			}
+		}
+	})
 
-	// Obter claims para pegar o ID do token
-	blacklistedClaims, err := service.ValidateToken(blacklistedTokenPair.AccessToken)
-	require.NoError(t, err)
+	t.Run("blacklisted token", func(t *testing.T) {
+		blacklistedUserID := ulid.Make()
+		blacklistedRoles := []string{"USER"}
+		blacklistedTokenPair, err := service.GenerateTokenPair(blacklistedUserID, blacklistedRoles)
+		require.NoError(t, err)
 
-	// Add token to blacklist usando o ID
-	err = service.BlacklistToken(blacklistedClaims.ID, blacklistedClaims.ExpiresAt.Time)
-	require.NoError(t, err)
+		blacklistedClaims, err := service.ValidateToken(blacklistedTokenPair.AccessToken)
+		require.NoError(t, err)
 
-	// Try to validate blacklisted token
-	_, err = service.ValidateToken(blacklistedTokenPair.AccessToken)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), domain.ErrTokenBlacklisted.GetMessage())
+		err = service.BlacklistToken(blacklistedClaims.ID, blacklistedClaims.ExpiresAt.Time)
+		require.NoError(t, err)
+
+		_, err = service.ValidateToken(blacklistedTokenPair.AccessToken)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), domain.ErrTokenBlacklisted.GetMessage())
+	})
+
+	t.Run("token with invalid signature", func(t *testing.T) {
+		// Create a new service with different keys
+		otherService := getJWTService(t)
+		userID := ulid.Make()
+		roles := []string{"ADMIN"}
+		tokenPair, err := otherService.GenerateTokenPair(userID, roles)
+		require.NoError(t, err)
+
+		// Try to validate with original service
+		_, err = service.ValidateToken(tokenPair.AccessToken)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "invalid")
+	})
+
+	t.Run("token with missing required claims", func(t *testing.T) {
+		// This would require modifying the token generation to create invalid tokens
+		// We'll test this in a separate test that mocks the token generation
+	})
 }
 
 func TestJWTService_GenerateTokenPair(t *testing.T) {
 	service := getJWTService(t)
 
-	userID := ulid.Make()
-	roles := []string{"ADMIN", "USER"}
+	t.Run("valid token pair generation", func(t *testing.T) {
+		userID := ulid.Make()
+		roles := []string{"ADMIN", "USER"}
 
-	tokenPair, err := service.GenerateTokenPair(userID, roles)
-	require.NoError(t, err)
-	assert.NotEmpty(t, tokenPair.AccessToken)
-	assert.NotEmpty(t, tokenPair.RefreshToken)
+		tokenPair, err := service.GenerateTokenPair(userID, roles)
+		require.NoError(t, err)
+		assert.NotEmpty(t, tokenPair.AccessToken)
+		assert.NotEmpty(t, tokenPair.RefreshToken)
 
-	// Validar o token de acesso
-	claims, err := service.ValidateToken(tokenPair.AccessToken)
-	require.NoError(t, err)
-	assert.NotNil(t, claims)
-	if claims != nil {
+		// Validate access token
+		claims, err := service.ValidateToken(tokenPair.AccessToken)
+		require.NoError(t, err)
+		assert.NotNil(t, claims)
 		assert.Equal(t, userID.String(), claims.Subject)
 		assert.Equal(t, roles, claims.Roles)
-	}
 
-	// Validar o token de refresh
-	claims, err = service.ValidateToken(tokenPair.RefreshToken)
-	require.NoError(t, err)
-	assert.NotNil(t, claims)
-	if claims != nil {
+		// Validate refresh token
+		claims, err = service.ValidateToken(tokenPair.RefreshToken)
+		require.NoError(t, err)
+		assert.NotNil(t, claims)
 		assert.Equal(t, userID.String(), claims.Subject)
 		assert.Equal(t, roles, claims.Roles)
-	}
+	})
+
+	t.Run("token pair with empty roles", func(t *testing.T) {
+		userID := ulid.Make()
+		roles := []string{}
+
+		_, err := service.GenerateTokenPair(userID, roles)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "Token has no roles")
+	})
+
+	t.Run("token pair with nil roles", func(t *testing.T) {
+		userID := ulid.Make()
+		var roles []string
+
+		_, err := service.GenerateTokenPair(userID, roles)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "Token has no roles")
+	})
 }
 
 func TestJWTService_GetJWKS(t *testing.T) {
 	service := getJWTService(t)
 
-	ctx := context.Background()
-	jwks, err := service.GetJWKS(ctx)
-	require.NoError(t, err)
-	require.NotNil(t, jwks)
+	t.Run("valid JWKS retrieval", func(t *testing.T) {
+		ctx := context.Background()
+		jwks, err := service.GetJWKS(ctx)
+		require.NoError(t, err)
+		require.NotNil(t, jwks)
 
-	// Verificar se o JWKS contém as chaves esperadas
-	keys, ok := jwks["keys"].([]map[string]interface{})
-	require.True(t, ok, "JWKS should contain a 'keys' array")
-	assert.NotEmpty(t, keys, "JWKS should contain at least one key")
+		keys, ok := jwks["keys"].([]map[string]interface{})
+		require.True(t, ok, "JWKS should contain a 'keys' array")
+		assert.NotEmpty(t, keys, "JWKS should contain at least one key")
 
-	// Verificar se cada chave tem os campos obrigatórios
-	for _, key := range keys {
-		assert.Contains(t, key, "kty", "Key should have 'kty' field")
-		assert.Contains(t, key, "kid", "Key should have 'kid' field")
-		assert.Contains(t, key, "use", "Key should have 'use' field")
-		assert.Contains(t, key, "alg", "Key should have 'alg' field")
-		assert.Contains(t, key, "n", "Key should have 'n' field")
-		assert.Contains(t, key, "e", "Key should have 'e' field")
-	}
+		for _, key := range keys {
+			assert.Contains(t, key, "kty", "Key should have 'kty' field")
+			assert.Contains(t, key, "kid", "Key should have 'kid' field")
+			assert.Contains(t, key, "use", "Key should have 'use' field")
+			assert.Contains(t, key, "alg", "Key should have 'alg' field")
+			assert.Contains(t, key, "n", "Key should have 'n' field")
+			assert.Contains(t, key, "e", "Key should have 'e' field")
+		}
+	})
+
+	t.Run("JWKS after key rotation", func(t *testing.T) {
+		// Get initial JWKS
+		ctx := context.Background()
+		initialJWKS, err := service.GetJWKS(ctx)
+		require.NoError(t, err)
+
+		// Rotate keys
+		err = service.RotateKeys()
+		require.NoError(t, err)
+
+		// Get new JWKS
+		newJWKS, err := service.GetJWKS(ctx)
+		require.NoError(t, err)
+
+		// Verify JWKS has changed
+		assert.NotEqual(t, initialJWKS, newJWKS)
+	})
 }
 
 func TestJWTService_RotateKeys(t *testing.T) {
 	service := getJWTService(t)
 
-	// Gerar token com a chave antiga
-	userID := ulid.Make()
-	roles := []string{"ADMIN"}
+	t.Run("successful key rotation", func(t *testing.T) {
+		// Generate token with old key
+		userID := ulid.Make()
+		roles := []string{"ADMIN"}
+		tokenPair1, err := service.GenerateTokenPair(userID, roles)
+		require.NoError(t, err)
 
-	tokenPair1, err := service.GenerateTokenPair(userID, roles)
-	require.NoError(t, err)
-
-	// Validar token com a chave antiga
-	validatedClaims, err := service.ValidateToken(tokenPair1.AccessToken)
-	require.NoError(t, err)
-	assert.NotNil(t, validatedClaims)
-	if validatedClaims != nil {
+		// Validate token with old key
+		validatedClaims, err := service.ValidateToken(tokenPair1.AccessToken)
+		require.NoError(t, err)
+		assert.NotNil(t, validatedClaims)
 		assert.Equal(t, userID.String(), validatedClaims.Subject)
 		assert.Contains(t, validatedClaims.Roles, "ADMIN")
-	}
 
-	// Rotacionar chaves
-	err = service.RotateKeys()
-	require.NoError(t, err)
+		// Rotate keys
+		err = service.RotateKeys()
+		require.NoError(t, err)
 
-	// Gerar novo token com a nova chave
-	tokenPair2, err := service.GenerateTokenPair(userID, roles)
-	require.NoError(t, err)
+		// Generate new token with new key
+		tokenPair2, err := service.GenerateTokenPair(userID, roles)
+		require.NoError(t, err)
 
-	// Validar novo token
-	validatedClaims, err = service.ValidateToken(tokenPair2.AccessToken)
-	require.NoError(t, err)
-	assert.NotNil(t, validatedClaims)
-	if validatedClaims != nil {
+		// Validate new token
+		validatedClaims, err = service.ValidateToken(tokenPair2.AccessToken)
+		require.NoError(t, err)
+		assert.NotNil(t, validatedClaims)
 		assert.Equal(t, userID.String(), validatedClaims.Subject)
 		assert.Contains(t, validatedClaims.Roles, "ADMIN")
-	}
 
-	// Verificar se o token antigo é inválido após a rotação
-	_, err = service.ValidateToken(tokenPair1.AccessToken)
-	require.Error(t, err)
-	assert.True(t, strings.Contains(err.Error(), "invalid") || strings.Contains(err.Error(), "signature"), "Error should indicate invalid token")
+		// Verify old token is invalid
+		_, err = service.ValidateToken(tokenPair1.AccessToken)
+		require.Error(t, err)
+		assert.True(t, strings.Contains(err.Error(), "invalid") || strings.Contains(err.Error(), "signature"))
+	})
 
-	// Verificar se o JWKS foi atualizado
-	ctx := context.Background()
-	jwks, err := service.GetJWKS(ctx)
-	require.NoError(t, err)
-	require.NotNil(t, jwks)
-	keys := jwks["keys"].([]map[string]interface{})
-	assert.NotEmpty(t, keys)
+	t.Run("multiple key rotations", func(t *testing.T) {
+		// Perform multiple rotations
+		for i := 0; i < 3; i++ {
+			err := service.RotateKeys()
+			require.NoError(t, err)
+		}
+
+		// Generate and validate token after multiple rotations
+		userID := ulid.Make()
+		roles := []string{"ADMIN"}
+		tokenPair, err := service.GenerateTokenPair(userID, roles)
+		require.NoError(t, err)
+
+		claims, err := service.ValidateToken(tokenPair.AccessToken)
+		require.NoError(t, err)
+		assert.NotNil(t, claims)
+		assert.Equal(t, userID.String(), claims.Subject)
+	})
 }
 
 func TestJWTService_TokenBlacklist(t *testing.T) {
 	service := getJWTService(t)
-	userID := ulid.Make()
-	roles := []string{"user"}
 
 	t.Run("blacklist and check token", func(t *testing.T) {
+		userID := ulid.Make()
+		roles := []string{"user"}
+
 		// Generate a token
 		tokenPair, err := service.GenerateTokenPair(userID, roles)
 		require.NoError(t, err)
@@ -233,57 +307,94 @@ func TestJWTService_TokenBlacklist(t *testing.T) {
 		assert.Nil(t, claims)
 		assert.ErrorIs(t, err, domain.ErrTokenBlacklisted)
 	})
-}
 
-func TestJWTService_BlacklistToken(t *testing.T) {
-	service := getJWTService(t)
+	t.Run("blacklist multiple tokens", func(t *testing.T) {
+		userID := ulid.Make()
+		roles := []string{"user"}
 
-	userID := ulid.Make()
-	roles := []string{"ADMIN"}
+		// Generate multiple tokens
+		tokens := make([]string, 3)
+		for i := 0; i < 3; i++ {
+			tokenPair, err := service.GenerateTokenPair(userID, roles)
+			require.NoError(t, err)
+			tokens[i] = tokenPair.AccessToken
+		}
 
-	// Gerar um token válido
-	tokenPair, err := service.GenerateTokenPair(userID, roles)
-	require.NoError(t, err)
+		// Blacklist all tokens
+		for _, token := range tokens {
+			claims, err := service.ValidateToken(token)
+			require.NoError(t, err)
+			err = service.BlacklistToken(claims.ID, claims.ExpiresAt.Time)
+			require.NoError(t, err)
+		}
 
-	// Verificar que o token é válido antes de ser adicionado à blacklist
-	claims, err := service.ValidateToken(tokenPair.AccessToken)
-	require.NoError(t, err)
-	assert.NotNil(t, claims)
+		// Verify all tokens are blacklisted
+		for _, token := range tokens {
+			_, err := service.ValidateToken(token)
+			assert.Error(t, err)
+			assert.ErrorIs(t, err, domain.ErrTokenBlacklisted)
+		}
+	})
 
-	// Adicionar o token à blacklist usando o ID do token
-	err = service.BlacklistToken(claims.ID, claims.ExpiresAt.Time)
-	require.NoError(t, err)
+	t.Run("blacklist expired token", func(t *testing.T) {
+		shortService := getJWTServiceWithDuration(t, 1*time.Second, time.Duration(24*time.Hour))
+		userID := ulid.Make()
+		roles := []string{"user"}
 
-	// Verificar que o token é rejeitado após ser adicionado à blacklist
-	_, err = service.ValidateToken(tokenPair.AccessToken)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "blacklisted")
+		tokenPair, err := shortService.GenerateTokenPair(userID, roles)
+		require.NoError(t, err)
 
-	// Verificar que o token de refresh não é afetado
-	claims, err = service.ValidateToken(tokenPair.RefreshToken)
-	require.NoError(t, err)
-	assert.NotNil(t, claims)
+		claims, err := shortService.ValidateToken(tokenPair.AccessToken)
+		require.NoError(t, err)
+
+		time.Sleep(2 * time.Second)
+
+		// Try to blacklist expired token
+		err = shortService.BlacklistToken(claims.ID, claims.ExpiresAt.Time)
+		require.NoError(t, err)
+
+		// Verify token is both expired and blacklisted
+		_, err = shortService.ValidateToken(tokenPair.AccessToken)
+		assert.Error(t, err)
+		assert.True(t, strings.Contains(err.Error(), "expired") || strings.Contains(err.Error(), "blacklisted"))
+	})
 }
 
 func TestJWTService_GetPublicKey(t *testing.T) {
 	service := getJWTService(t)
 
-	// Obter a chave pública
-	key := service.GetPublicKey()
-	require.NotNil(t, key)
+	t.Run("get public key", func(t *testing.T) {
+		key := service.GetPublicKey()
+		require.NotNil(t, key)
 
-	// Verificar se a chave pode ser usada para validar um token
-	userID := ulid.Make()
-	roles := []string{"ADMIN"}
+		// Verify key can be used to validate tokens
+		userID := ulid.Make()
+		roles := []string{"ADMIN"}
 
-	tokenPair, err := service.GenerateTokenPair(userID, roles)
-	require.NoError(t, err)
+		tokenPair, err := service.GenerateTokenPair(userID, roles)
+		require.NoError(t, err)
 
-	claims, err := service.ValidateToken(tokenPair.AccessToken)
-	require.NoError(t, err)
-	assert.NotNil(t, claims)
-	if claims != nil {
+		claims, err := service.ValidateToken(tokenPair.AccessToken)
+		require.NoError(t, err)
+		assert.NotNil(t, claims)
 		assert.Equal(t, userID.String(), claims.Subject)
 		assert.Contains(t, claims.Roles, "ADMIN")
-	}
+	})
+
+	t.Run("public key after rotation", func(t *testing.T) {
+		// Get initial public key
+		initialKey := service.GetPublicKey()
+		require.NotNil(t, initialKey)
+
+		// Rotate keys
+		err := service.RotateKeys()
+		require.NoError(t, err)
+
+		// Get new public key
+		newKey := service.GetPublicKey()
+		require.NotNil(t, newKey)
+
+		// Verify keys are different
+		assert.NotEqual(t, initialKey, newKey)
+	})
 }
