@@ -23,7 +23,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o user-manager-serv
 FROM alpine:3.19
 
 # Install runtime dependencies
-RUN apk add --no-cache ca-certificates tzdata
+RUN apk add --no-cache ca-certificates tzdata curl
 
 # Create non-root user
 RUN adduser -D -g '' appuser
@@ -45,6 +45,10 @@ EXPOSE 8080
 
 # Set environment variables
 ENV GIN_MODE=release
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8080/health/ready || exit 1
 
 # Run the application
 CMD ["./user-manager-service"] 

@@ -24,6 +24,9 @@ A RESTful service for user management with authentication, authorization, and OA
 - Vault integration for key management
 - OpenTelemetry integration for observability
 - Swagger/OpenAPI documentation
+- Header-based API versioning
+- Comprehensive error handling
+- Configurable JWT strategies
 
 ## Architecture
 
@@ -34,6 +37,50 @@ The project follows a hexagonal architecture with the following layers:
 - `infrastructure`: Database, JWT, and other external service implementations
 - `interfaces/http`: HTTP handlers, middlewares, and OpenAPI/Swagger documentation
 
+### API Versioning
+
+The service uses header-based versioning through the `Accept` header:
+
+```http
+Accept: application/vnd.ipede.v1+json
+```
+
+This approach:
+- Keeps URLs clean and stable
+- Allows for multiple API versions to coexist
+- Provides better separation of concerns
+- Follows REST best practices
+
+### Error Handling
+
+The service implements a comprehensive error handling system with:
+
+- Domain-specific error types (`BusinessError` and `InfraError`)
+- Standardized error codes (U0001-U0044)
+- Detailed error messages and codes
+- Proper error wrapping and context
+- HTTP status code mapping
+
+Example error response:
+```json
+{
+  "code": "U0001",
+  "message": "Invalid credentials"
+}
+```
+
+### JWT Strategy
+
+The service implements a composite JWT strategy that:
+
+- Supports multiple signing strategies (Vault and Local)
+- Provides automatic fallback mechanisms
+- Implements key rotation
+- Handles token verification with proper error handling
+- Supports JWKS for public key distribution
+
+The strategy automatically falls back to local signing if Vault is unavailable, ensuring high availability.
+
 ## Getting Started
 
 ### Prerequisites
@@ -42,6 +89,7 @@ The project follows a hexagonal architecture with the following layers:
 - PostgreSQL
 - Make
 - Docker (optional)
+- Vault (optional, for key management)
 
 ### Environment Variables
 
@@ -58,10 +106,13 @@ DB_NAME=usuarios
 # JWT Configuration
 JWT_ACCESS_DURATION=15m
 JWT_REFRESH_DURATION=168h  # 7 days
+RSA_KEY_SIZE=2048
+JWKS_CACHE_DURATION=1h
 
 # Server Configuration
 SERVER_PORT=8080
 SERVER_HOST=localhost
+SERVER_URL=http://localhost:8080
 
 # Vault Configuration (Optional)
 ENABLE_VAULT=true
@@ -133,8 +184,8 @@ The API uses JWT (JSON Web Tokens) for authentication with the following feature
 
 To access protected endpoints:
 
-1. Register a new user using the `/api/v1/users/register` endpoint
-2. Login using the `/api/v1/users/login` endpoint to get your access token
+1. Register a new user using the `/api/users/register` endpoint
+2. Login using the `/api/auth/login` endpoint to get your access token
 3. Include the token in the `Authorization` header of subsequent requests:
    ```
    Authorization: Bearer <your-access-token>
@@ -153,29 +204,29 @@ The service implements OAuth2 and OpenID Connect protocols with the following en
 ### Available Endpoints
 
 #### Public Endpoints
-- `POST /api/v1/users/register` - Register a new user
-- `POST /api/v1/users/login` - Login and get access token
-- `POST /auth/verify-email` - Verify email address
-- `POST /auth/request-password-reset` - Request password reset
-- `POST /auth/reset-password` - Reset password
-- `POST /oauth2/token` - OAuth2 token endpoint
+- `POST /api/users/register` - Register a new user
+- `POST /api/auth/login` - Login and get access token
+- `POST /api/auth/verify-email` - Verify email address
+- `POST /api/auth/request-password-reset` - Request password reset
+- `POST /api/auth/reset-password` - Reset password
+- `POST /api/oauth2/token` - OAuth2 token endpoint
 - `GET /.well-known/openid-configuration` - OpenID Provider Configuration
 - `GET /.well-known/jwks.json` - JSON Web Key Set
 
 #### Protected Endpoints (Requires Authentication)
-- `GET /users/{id}` - Get user by ID
-- `PUT /users/{id}` - Update user by ID
-- `GET /oauth2/authorize` - OAuth2 authorization endpoint
-- `POST /oauth2/token` - OAuth2 token endpoint
-- `GET /oauth2/userinfo` - Get user information
+- `GET /api/users/{id}` - Get user by ID
+- `PUT /api/users/{id}` - Update user by ID
+- `GET /api/oauth2/authorize` - OAuth2 authorization endpoint
+- `POST /api/oauth2/token` - OAuth2 token endpoint
+- `GET /api/oauth2/userinfo` - Get user information
 
 #### Admin Endpoints (Requires Admin Role)
-- `GET /users` - List all users
-- `GET /oauth2/clients` - List OAuth2 clients
-- `POST /oauth2/clients` - Create OAuth2 client
-- `GET /oauth2/clients/{id}` - Get OAuth2 client
-- `PUT /oauth2/clients/{id}` - Update OAuth2 client
-- `DELETE /oauth2/clients/{id}` - Delete OAuth2 client
+- `GET /api/users` - List all users
+- `GET /api/oauth2/clients` - List OAuth2 clients
+- `POST /api/oauth2/clients` - Create OAuth2 client
+- `GET /api/oauth2/clients/{id}` - Get OAuth2 client
+- `PUT /api/oauth2/clients/{id}` - Update OAuth2 client
+- `DELETE /api/oauth2/clients/{id}` - Delete OAuth2 client
 
 ### Error Responses
 
@@ -183,21 +234,56 @@ The API uses standard HTTP status codes and returns error details in the followi
 
 ```json
 {
-  "message": "Error message",
-  "details": "Additional error details (optional)",
-  "code": "ERROR_CODE"
+  "code": "ERROR_CODE",
+  "message": "Error message"
 }
 ```
 
 Common error codes:
-- `VALIDATION_ERROR` - Invalid input data
-- `UNAUTHORIZED` - Missing or invalid authentication
-- `NOT_FOUND` - Requested resource not found
-- `CONFLICT` - Resource already exists
-- `INTERNAL_ERROR` - Server error
-- `RATE_LIMIT_EXCEEDED` - Too many requests
-- `TOKEN_EXPIRED` - JWT token has expired
-- `TOKEN_BLACKLISTED` - JWT token has been revoked
+- `U0001` - Invalid credentials
+- `U0002` - Invalid client
+- `U0003` - Invalid authorization code
+- `U0004` - Authorization code expired
+- `U0005` - Invalid PKCE
+- `U0006` - Invalid user ID
+- `U0007` - Resource not found
+- `U0008` - Invalid resource
+- `U0009` - Resource already exists
+- `U0010` - Invalid scope
+- `U0011` - Invalid field
+- `U0012` - Path parameter not found
+- `U0013` - Invalid request body
+- `U0014` - Unauthorized
+- `U0015` - Internal server error
+- `U0016` - Failed to generate token
+- `U0017` - Database query error
+- `U0018` - Forbidden
+- `U0019` - Invalid token
+- `U0020` - Invalid duration
+- `U0021` - Token expired
+- `U0022` - Token not yet valid
+- `U0023` - Token has no roles
+- `U0024` - Token subject required
+- `U0025` - Invalid claims
+- `U0026` - Token blacklisted
+- `U0027` - Token generation failed
+- `U0028` - Invalid key configuration
+- `U0029` - Invalid signing method
+- `U0030` - Invalid signature
+- `U0031` - Invalid redirect URI
+- `U0032` - Invalid code challenge method
+- `U0033` - Invalid code challenge
+- `U0034` - Email not verified
+- `U0035` - Invalid verification code
+- `U0036` - Verification code expired
+- `U0037` - Invalid password change code
+- `U0038` - Password change code expired
+- `U0039` - Email send failed
+- `U0040` - Missing SMTP configuration
+- `U0041` - Invalid email
+- `U0042` - Token signature invalid
+- `U0043` - Token malformed
+- `U0044` - Token has no roles
 
 ## Project Structure
 
@@ -279,6 +365,9 @@ The service includes OpenTelemetry integration for:
 - Email verification
 - Token blacklisting
 - Role-based access control
+- Header-based API versioning
+- Comprehensive error handling
+- Configurable JWT strategies
 
 ## License
 

@@ -21,6 +21,7 @@ import (
 
 type Router struct {
 	router *chi.Mux
+	db     *database.Postgres
 }
 
 func NewRouter(
@@ -28,7 +29,6 @@ func NewRouter(
 	cfg *config.Config,
 	logger *zap.Logger,
 ) *Router {
-
 	strategy := jwt.NewCompositeStrategy(cfg, logger)
 	jwtService := jwt.NewJWTService(strategy, cfg, logger)
 	authMiddleware := auth.NewAuthMiddleware(jwtService, logger)
@@ -47,63 +47,97 @@ func NewRouter(
 	oidcHandler := handlers.NewOIDCHandler(oidcService, jwtService, logger)
 	oauth2Handler := handlers.NewOAuth2Handler(oauthRepo, logger)
 
-	// Swagger documentation
+	// Create router with middleware
 	router := createRouter()
 
 	rateLimiter := ratelimit.NewRateLimiter(100, 200, 3*time.Minute)
 	router.Use(rateLimiter.Middleware)
 
+	// Health check endpoints
+	router.Group(func(r chi.Router) {
+		r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("OK"))
+		})
+
+		r.Get("/health/ready", func(w http.ResponseWriter, r *http.Request) {
+			// Check database connection
+			if err := db.Ping(); err != nil {
+				logger.Error("Database health check failed", zap.Error(err))
+				w.WriteHeader(http.StatusServiceUnavailable)
+				w.Write([]byte("Database connection failed"))
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("Ready"))
+		})
+
+		r.Get("/health/live", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("Alive"))
+		})
+	})
+
+	// Swagger UI configuration
 	router.Get("/swagger/*", httpSwagger.Handler(
-		httpSwagger.URL("http://localhost:8080/swagger/doc.json"),
-		httpSwagger.DocExpansion("none"),
+		httpSwagger.URL("/swagger/doc.json"),
+		httpSwagger.DocExpansion("list"),
 		httpSwagger.DomID("swagger-ui"),
+		httpSwagger.DeepLinking(true),
+		httpSwagger.PersistAuthorization(true),
 	))
 
-	// Serve Swagger JSON
+	// Serve Swagger JSON with CORS headers
 	router.Get("/swagger/doc.json", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Origin, Content-Type, Accept, Authorization")
+		w.Header().Set("Content-Type", "application/json")
 		http.ServeFile(w, r, "docs/swagger.json")
 	})
 
-	// Public routes
-	router.Group(func(r chi.Router) {
-		r.Post("/register", authHandler.RegisterHandler)
-		r.Post("/auth/login", authHandler.LoginHandler)
-		r.Post("/auth/verify-email", authHandler.VerifyEmailHandler)
-		r.Post("/auth/request-password-reset", authHandler.RequestPasswordResetHandler)
-		r.Post("/auth/reset-password", authHandler.ResetPasswordHandler)
+	// API routes without version in URL
+	router.Route("/api", func(r chi.Router) {
+		// Public routes
+		r.Group(func(r chi.Router) {
+			r.Post("/register", authHandler.RegisterHandler)
+			r.Post("/auth/login", authHandler.LoginHandler)
+			r.Post("/auth/verify-email", authHandler.VerifyEmailHandler)
+			r.Post("/auth/request-password-reset", authHandler.RequestPasswordResetHandler)
+			r.Post("/auth/reset-password", authHandler.ResetPasswordHandler)
+		})
+
+		// OIDC routes
+		r.Group(func(r chi.Router) {
+			r.Get("/.well-known/openid-configuration", oidcHandler.GetOpenIDConfigurationHandler)
+			r.Get("/.well-known/jwks.json", oidcHandler.GetJWKSHandler)
+		})
+
+		// Admin routes
+		r.Group(func(r chi.Router) {
+			r.Use(authMiddleware.Authenticator, authMiddleware.RequireRole("admin"))
+			r.Get("/users", userHandler.ListUsersHandler)
+			r.Get("/oauth2/clients", oauth2Handler.ListClientsHandler)
+		})
+
+		// Protected routes
+		r.Group(func(r chi.Router) {
+			r.Use(authMiddleware.Authenticator)
+			r.Get("/users/{id}", userHandler.GetUserHandler)
+			r.Put("/users/{id}", userHandler.UpdateUserHandler)
+			r.Get("/oauth2/authorize", oidcHandler.AuthorizeHandler)
+			r.Post("/oauth2/token", oidcHandler.TokenHandler)
+			r.Get("/oauth2/userinfo", oidcHandler.GetUserInfoHandler)
+
+			// OAuth2 client management routes
+			r.Post("/oauth2/clients", oauth2Handler.CreateClientHandler)
+			r.Get("/oauth2/clients/{id}", oauth2Handler.GetClientHandler)
+			r.Put("/oauth2/clients/{id}", oauth2Handler.UpdateClientHandler)
+			r.Delete("/oauth2/clients/{id}", oauth2Handler.DeleteClientHandler)
+		})
 	})
 
-	// OIDC routes
-	router.Group(func(r chi.Router) {
-		r.Get("/.well-known/openid-configuration", oidcHandler.GetOpenIDConfigurationHandler)
-		r.Get("/.well-known/jwks.json", oidcHandler.GetJWKSHandler)
-	})
-
-	// Admin routes
-	router.Group(func(r chi.Router) {
-		r.Use(authMiddleware.Authenticator, authMiddleware.RequireRole("admin"))
-		r.Get("/users", userHandler.ListUsersHandler)
-		r.Get("/oauth2/clients", oauth2Handler.ListClientsHandler)
-	})
-
-	// Protected routes
-	router.Group(func(r chi.Router) {
-		r.Use(authMiddleware.Authenticator)
-		r.Get("/users/{id}", userHandler.GetUserHandler)
-		r.Put("/users/{id}", userHandler.UpdateUserHandler)
-		r.Get("/oauth2/authorize", oidcHandler.AuthorizeHandler)
-		r.Post("/oauth2/token", oidcHandler.TokenHandler)
-		r.Get("/oauth2/userinfo", oidcHandler.GetUserInfoHandler)
-
-		// OAuth2 client management routes
-
-		r.Post("/oauth2/clients", oauth2Handler.CreateClientHandler)
-		r.Get("/oauth2/clients/{id}", oauth2Handler.GetClientHandler)
-		r.Put("/oauth2/clients/{id}", oauth2Handler.UpdateClientHandler)
-		r.Delete("/oauth2/clients/{id}", oauth2Handler.DeleteClientHandler)
-	})
-
-	return &Router{router: router}
+	return &Router{router: router, db: db}
 }
 
 func createRouter() *chi.Mux {
