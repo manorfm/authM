@@ -113,9 +113,9 @@ func NewRouter(
 			r.Get("/.well-known/jwks.json", oidcHandler.GetJWKSHandler)
 		})
 
-		// Admin routes
+		// ROOT routes
 		r.Group(func(r chi.Router) {
-			r.Use(authMiddleware.Authenticator, authMiddleware.RequireRole("admin"))
+			r.Use(authMiddleware.Authenticator, authMiddleware.RequireRole("ROOT"))
 			r.Get("/users", userHandler.ListUsersHandler)
 			r.Get("/oauth2/clients", oauth2Handler.ListClientsHandler)
 		})
