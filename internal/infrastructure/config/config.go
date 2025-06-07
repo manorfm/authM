@@ -11,6 +11,18 @@ import (
 	"go.uber.org/zap"
 )
 
+// SMTPConfig holds all SMTP-related configuration
+type SMTPConfig struct {
+	Host           string
+	Port           int
+	Username       string
+	Password       string
+	From           string
+	AuthValidation bool
+	UseTLS         bool
+	SkipVerify     bool
+}
+
 type Config struct {
 	DBHost     string
 	DBPort     int
@@ -33,12 +45,7 @@ type Config struct {
 	RSAKeySize        int
 	JWKSCacheDuration time.Duration
 
-	SMTPHost           string
-	SMTPPort           int
-	SMTPUsername       string
-	SMTPPassword       string
-	SMTPFrom           string
-	SMTPAuthValidation bool
+	SMTP SMTPConfig
 }
 
 // LoadConfig loads configuration from environment variables, logging with zap
@@ -89,11 +96,15 @@ func LoadConfig(logger *zap.Logger) (*Config, error) {
 
 		ServerURL: getEnv("SERVER_URL", "http://localhost:8080"),
 
-		SMTPHost:           getEnv("SMTP_HOST", "localhost"),
-		SMTPUsername:       getEnv("SMTP_USERNAME", ""),
-		SMTPPassword:       getEnv("SMTP_PASSWORD", ""),
-		SMTPFrom:           getEnv("SMTP_FROM", "noreply@example.com"),
-		SMTPAuthValidation: getEnv("SMTP_AUTH_VALIDATION", "true") == "true",
+		SMTP: SMTPConfig{
+			Host:           getEnv("SMTP_HOST", "localhost"),
+			Username:       getEnv("SMTP_USERNAME", ""),
+			Password:       getEnv("SMTP_PASSWORD", ""),
+			From:           getEnv("SMTP_FROM", "noreply@example.com"),
+			AuthValidation: getEnv("SMTP_AUTH_VALIDATION", "true") == "true",
+			UseTLS:         getEnv("SMTP_USE_TLS", "true") == "true",
+			SkipVerify:     getEnv("SMTP_SKIP_VERIFY", "false") == "true",
+		},
 	}
 
 	// Load numeric and duration values with error handling
@@ -116,7 +127,7 @@ func LoadConfig(logger *zap.Logger) (*Config, error) {
 	if cfg.JWKSCacheDuration, err = getDuration("JWKS_CACHE_DURATION", time.Hour); err != nil {
 		return nil, err
 	}
-	if cfg.SMTPPort, err = getInt("SMTP_PORT", 1025); err != nil {
+	if cfg.SMTP.Port, err = getInt("SMTP_PORT", 1025); err != nil {
 		return nil, err
 	}
 
@@ -147,8 +158,8 @@ func (c *Config) Validate() error {
 	if c.ServerPort <= 0 || c.ServerPort > 65535 {
 		return fmt.Errorf("ServerPort must be valid: got %d", c.ServerPort)
 	}
-	if c.SMTPPort <= 0 || c.SMTPPort > 65535 {
-		return fmt.Errorf("SMTPPort must be valid: got %d", c.SMTPPort)
+	if c.SMTP.Port <= 0 || c.SMTP.Port > 65535 {
+		return fmt.Errorf("SMTPPort must be valid: got %d", c.SMTP.Port)
 	}
 	if c.RSAKeySize < 2048 {
 		return fmt.Errorf("RSAKeySize must be at least 2048 bits: got %d", c.RSAKeySize)
