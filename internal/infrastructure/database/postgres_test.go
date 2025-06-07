@@ -8,12 +8,57 @@ import (
 	"github.com/ipede/user-manager-service/internal/infrastructure/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/wait"
 	"go.uber.org/zap"
 )
+
+func setupTestContainer(t *testing.T) (testcontainers.Container, *config.Config) {
+	ctx := context.Background()
+
+	req := testcontainers.ContainerRequest{
+		Image:        "postgres:15-alpine",
+		ExposedPorts: []string{"5432/tcp"},
+		Env: map[string]string{
+			"POSTGRES_USER":     "test",
+			"POSTGRES_PASSWORD": "test",
+			"POSTGRES_DB":       "test",
+		},
+		WaitingFor: wait.ForAll(
+			wait.ForLog("database system is ready to accept connections"),
+			wait.ForListeningPort("5432/tcp"),
+		),
+	}
+
+	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: req,
+		Started:          true,
+	})
+	require.NoError(t, err)
+
+	host, err := container.Host(ctx)
+	require.NoError(t, err)
+
+	port, err := container.MappedPort(ctx, "5432")
+	require.NoError(t, err)
+
+	cfg := &config.Config{
+		DBHost:     host,
+		DBPort:     port.Int(),
+		DBUser:     "test",
+		DBPassword: "test",
+		DBName:     "test",
+	}
+
+	return container, cfg
+}
 
 func TestNewPostgres(t *testing.T) {
 	ctx := context.Background()
 	logger := zap.NewNop()
+
+	container, cfg := setupTestContainer(t)
+	defer container.Terminate(ctx)
 
 	tests := []struct {
 		name    string
@@ -21,14 +66,8 @@ func TestNewPostgres(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "valid configuration",
-			cfg: &config.Config{
-				DBHost:     "localhost",
-				DBPort:     5432,
-				DBUser:     "owner",
-				DBPassword: "ownerTest",
-				DBName:     "users",
-			},
+			name:    "valid configuration",
+			cfg:     cfg,
 			wantErr: false,
 		},
 		{
@@ -91,13 +130,8 @@ func TestPostgres_Close(t *testing.T) {
 	ctx := context.Background()
 	logger := zap.NewNop()
 
-	cfg := &config.Config{
-		DBHost:     "localhost",
-		DBPort:     5432,
-		DBUser:     "owner",
-		DBPassword: "ownerTest",
-		DBName:     "users",
-	}
+	container, cfg := setupTestContainer(t)
+	defer container.Terminate(ctx)
 
 	db, err := NewPostgres(ctx, cfg, logger)
 	require.NoError(t, err)

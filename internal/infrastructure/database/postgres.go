@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/ipede/user-manager-service/internal/infrastructure/config"
 	"github.com/jackc/pgx/v5"
@@ -68,4 +69,11 @@ func (p *Postgres) Query(ctx context.Context, sql string, args ...interface{}) (
 // QueryRow executes a query that is expected to return at most one row
 func (p *Postgres) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
 	return p.pool.QueryRow(ctx, sql, args...)
+}
+
+// Ping checks if the database connection is alive
+func (p *Postgres) Ping() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return p.pool.Ping(ctx)
 }
