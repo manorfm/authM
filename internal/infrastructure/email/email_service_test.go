@@ -173,7 +173,7 @@ func TestEmailService_SendEmail(t *testing.T) {
 			}
 
 			// Send email
-			err := service.SendEmail(ctx, tt.email, tt.subject, tt.template, tt.code)
+			err := service.Send(ctx, tt.email, tt.subject, tt.template, tt.code)
 
 			// Assert results
 			if tt.expectedError != nil {

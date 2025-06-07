@@ -38,7 +38,7 @@ type EmailService struct {
 }
 
 // NewEmailService creates a new instance of EmailService
-func NewEmailService(cfg *config.SMTPConfig, logger *zap.Logger) domain.EmailCommand {
+func NewEmailService(cfg *config.SMTPConfig, logger *zap.Logger) domain.EmailSender {
 	return &EmailService{
 		config:     cfg,
 		logger:     logger,
@@ -80,7 +80,7 @@ func (s *EmailService) validateConfig() error {
 	return nil
 }
 
-func (s *EmailService) SendEmail(ctx context.Context, email, subject, template, code string) error {
+func (s *EmailService) Send(ctx context.Context, email, subject, template, code string) error {
 	if !s.isValidEmail(email) {
 		s.logger.Error("Invalid email address", zap.String("email", email))
 		return domain.ErrInvalidEmail

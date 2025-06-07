@@ -9,17 +9,17 @@ import (
 )
 
 type EmailTemplate struct {
-	config       *config.SMTPConfig
-	logger       *zap.Logger
-	emailCommand domain.EmailCommand
+	config      *config.SMTPConfig
+	logger      *zap.Logger
+	emailSender domain.EmailSender
 }
 
 func NewEmailTemplate(cfg *config.SMTPConfig, logger *zap.Logger) *EmailTemplate {
 	emailCommand := NewEmailService(cfg, logger)
 	return &EmailTemplate{
-		config:       cfg,
-		logger:       logger,
-		emailCommand: emailCommand,
+		config:      cfg,
+		logger:      logger,
+		emailSender: emailCommand,
 	}
 }
 
@@ -40,7 +40,7 @@ If you didn't request this verification, you can safely ignore this email.
 Best regards,
 The Team
 `
-	return s.emailCommand.SendEmail(ctx, email, subject, template, code)
+	return s.emailSender.Send(ctx, email, subject, template, code)
 }
 
 func (s *EmailTemplate) SendPasswordResetEmail(ctx context.Context, email, code string) error {
@@ -58,5 +58,5 @@ If you didn't request a password reset, please ignore this email or contact supp
 Stay secure,
 The Team
 `
-	return s.emailCommand.SendEmail(ctx, email, subject, template, code)
+	return s.emailSender.Send(ctx, email, subject, template, code)
 }

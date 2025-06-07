@@ -12,11 +12,11 @@ import (
 )
 
 // MockEmailService is a mock implementation of EmailServiceInterface
-type MockEmailService struct {
+type MockEmailSender struct {
 	mock.Mock
 }
 
-func (m *MockEmailService) SendEmail(ctx context.Context, email, subject, template, code string) error {
+func (m *MockEmailSender) Send(ctx context.Context, email, subject, template, code string) error {
 	args := m.Called(ctx, email, subject, template, code)
 	return args.Error(0)
 }
@@ -26,15 +26,15 @@ func TestEmailTemplate_SendVerificationEmail(t *testing.T) {
 		name          string
 		email         string
 		code          string
-		mockSetup     func(*MockEmailService)
+		mockSetup     func(*MockEmailSender)
 		expectedError error
 	}{
 		{
 			name:  "successful verification email",
 			email: "test@example.com",
 			code:  "123456",
-			mockSetup: func(m *MockEmailService) {
-				m.On("SendEmail",
+			mockSetup: func(m *MockEmailSender) {
+				m.On("Send",
 					mock.Anything,
 					"test@example.com",
 					"Welcome! Please verify your email",
@@ -48,8 +48,8 @@ func TestEmailTemplate_SendVerificationEmail(t *testing.T) {
 			name:  "smtp error during verification",
 			email: "test@example.com",
 			code:  "123456",
-			mockSetup: func(m *MockEmailService) {
-				m.On("SendEmail",
+			mockSetup: func(m *MockEmailSender) {
+				m.On("Send",
 					mock.Anything,
 					"test@example.com",
 					"Welcome! Please verify your email",
@@ -64,7 +64,7 @@ func TestEmailTemplate_SendVerificationEmail(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create mock email service
-			mockEmailService := new(MockEmailService)
+			mockEmailService := new(MockEmailSender)
 			tt.mockSetup(mockEmailService)
 
 			// Create logger
@@ -72,9 +72,9 @@ func TestEmailTemplate_SendVerificationEmail(t *testing.T) {
 
 			// Create email template with mock service
 			template := &EmailTemplate{
-				config:       &config.SMTPConfig{},
-				logger:       logger,
-				emailCommand: mockEmailService,
+				config:      &config.SMTPConfig{},
+				logger:      logger,
+				emailSender: mockEmailService,
 			}
 
 			// Send verification email
@@ -99,15 +99,15 @@ func TestEmailTemplate_SendPasswordResetEmail(t *testing.T) {
 		name          string
 		email         string
 		code          string
-		mockSetup     func(*MockEmailService)
+		mockSetup     func(*MockEmailSender)
 		expectedError error
 	}{
 		{
 			name:  "successful password reset email",
 			email: "test@example.com",
 			code:  "123456",
-			mockSetup: func(m *MockEmailService) {
-				m.On("SendEmail",
+			mockSetup: func(m *MockEmailSender) {
+				m.On("Send",
 					mock.Anything,
 					"test@example.com",
 					"Reset your password",
@@ -121,8 +121,8 @@ func TestEmailTemplate_SendPasswordResetEmail(t *testing.T) {
 			name:  "smtp error during password reset",
 			email: "test@example.com",
 			code:  "123456",
-			mockSetup: func(m *MockEmailService) {
-				m.On("SendEmail",
+			mockSetup: func(m *MockEmailSender) {
+				m.On("Send",
 					mock.Anything,
 					"test@example.com",
 					"Reset your password",
@@ -137,7 +137,7 @@ func TestEmailTemplate_SendPasswordResetEmail(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create mock email service
-			mockEmailService := new(MockEmailService)
+			mockEmailService := new(MockEmailSender)
 			tt.mockSetup(mockEmailService)
 
 			// Create logger
@@ -145,9 +145,9 @@ func TestEmailTemplate_SendPasswordResetEmail(t *testing.T) {
 
 			// Create email template with mock service
 			template := &EmailTemplate{
-				config:       &config.SMTPConfig{},
-				logger:       logger,
-				emailCommand: mockEmailService,
+				config:      &config.SMTPConfig{},
+				logger:      logger,
+				emailSender: mockEmailService,
 			}
 
 			// Send password reset email
