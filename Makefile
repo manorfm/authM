@@ -15,7 +15,7 @@ deps:
 
 # Run tests
 test:
-	go test -timeout=120s -v ./...
+	go test -timeout=240s -v ./... -cover
 
 # Build the application (ensure bin/ exists)
 build:

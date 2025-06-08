@@ -166,6 +166,17 @@ var (
 
 	// ErrTokenHasNoRoles is returned when the token has no roles
 	ErrTokenHasNoRoles = NewBusinessError("U0044", "Token has no roles")
+
+	// TOTP related errors
+	ErrTOTPNotEnabled            = NewBusinessError("U0045", "TOTP is not enabled for this user")
+	ErrTOTPAlreadyEnabled        = NewBusinessError("U0046", "TOTP is already enabled for this user")
+	ErrInvalidTOTPCode           = NewBusinessError("U0047", "Invalid TOTP code")
+	ErrTOTPSecretGeneration      = NewInfraError("U0048", "Failed to generate TOTP secret")
+	ErrTOTPQRGeneration          = NewInfraError("U0049", "Failed to generate TOTP QR code")
+	ErrTOTPBackupCodesGeneration = NewInfraError("U0050", "Failed to generate TOTP backup codes")
+	ErrInvalidTOTPBackupCode     = NewBusinessError("U0051", "Invalid TOTP backup code")
+	ErrTOTPBackupCodesExhausted  = NewBusinessError("U0052", "All TOTP backup codes have been used")
+	ErrTOTPVerificationRequired  = NewBusinessError("U0053", "TOTP verification required")
 )
 
 func (e *BusinessError) GetCode() string {

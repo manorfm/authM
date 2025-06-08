@@ -12,6 +12,7 @@ import (
 	"github.com/ipede/user-manager-service/internal/infrastructure/email"
 	"github.com/ipede/user-manager-service/internal/infrastructure/jwt"
 	"github.com/ipede/user-manager-service/internal/infrastructure/repository"
+	"github.com/ipede/user-manager-service/internal/infrastructure/totp"
 	"github.com/ipede/user-manager-service/internal/interfaces/http/handlers"
 	"github.com/ipede/user-manager-service/internal/interfaces/http/middleware/auth"
 	"github.com/ipede/user-manager-service/internal/interfaces/http/middleware/ratelimit"
@@ -40,6 +41,11 @@ func NewRouter(
 	authService := application.NewAuthService(userRepo, verificationRepo, jwtService, emailTemplate, logger)
 	oauth2Service := application.NewOAuth2Service(oauthRepo, logger)
 	oidcService := application.NewOIDCService(oauth2Service, jwtService, userRepo, cfg, logger)
+
+	totpRepo := repository.NewTOTPRepository(db, logger)
+	totpGenerator := totp.NewGenerator(logger)
+	totpService := application.NewTOTPService(totpRepo, totpGenerator, logger)
+	totpHandler := handlers.NewTOTPHandler(totpService, logger)
 
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(authService, logger)
@@ -113,9 +119,9 @@ func NewRouter(
 			r.Get("/.well-known/jwks.json", oidcHandler.GetJWKSHandler)
 		})
 
-		// ROOT routes
+		// Admin routes
 		r.Group(func(r chi.Router) {
-			r.Use(authMiddleware.Authenticator, authMiddleware.RequireRole("ROOT"))
+			r.Use(authMiddleware.Authenticator, authMiddleware.RequireRole("admin"))
 			r.Get("/users", userHandler.ListUsersHandler)
 			r.Get("/oauth2/clients", oauth2Handler.ListClientsHandler)
 		})
@@ -134,6 +140,12 @@ func NewRouter(
 			r.Get("/oauth2/clients/{id}", oauth2Handler.GetClientHandler)
 			r.Put("/oauth2/clients/{id}", oauth2Handler.UpdateClientHandler)
 			r.Delete("/oauth2/clients/{id}", oauth2Handler.DeleteClientHandler)
+
+			// TOTP routes
+			r.Post("/totp/enable", totpHandler.EnableTOTP)
+			r.Post("/totp/verify", totpHandler.VerifyTOTP)
+			r.Post("/totp/verify-backup", totpHandler.VerifyBackupCode)
+			r.Post("/totp/disable", totpHandler.DisableTOTP)
 		})
 	})
 

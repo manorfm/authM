@@ -34,7 +34,12 @@ func getStatus(err domain.Error) int {
 		return http.StatusForbidden
 	case domain.ErrInvalidToken.GetCode():
 		return http.StatusForbidden
+	case domain.ErrTOTPVerificationRequired.GetCode():
+		return http.StatusForbidden
+	case domain.ErrDatabaseQuery.GetCode():
+		return http.StatusInternalServerError
 	}
+
 	return http.StatusBadRequest
 }
 

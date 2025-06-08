@@ -90,20 +90,21 @@ func (r *PostgresOAuth2Repository) ListClients(ctx context.Context) ([]*domain.O
 
 func (r *PostgresOAuth2Repository) CreateAuthorizationCode(ctx context.Context, code *domain.AuthorizationCode) error {
 	return r.db.Exec(ctx, `
-		INSERT INTO authorization_codes (code, client_id, user_id, scopes, expires_at, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
-	`, code.Code, code.ClientID, code.UserID, code.Scopes, code.ExpiresAt, code.CreatedAt)
+		INSERT INTO authorization_codes (code, client_id, user_id, scopes, expires_at, created_at, code_verifier, code_challenge, code_challenge_method)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	`, code.Code, code.ClientID, code.UserID, code.Scopes, code.ExpiresAt, code.CreatedAt, code.CodeVerifier, code.CodeChallenge, code.CodeChallengeMethod)
 }
 
 func (r *PostgresOAuth2Repository) GetAuthorizationCode(ctx context.Context, code string) (*domain.AuthorizationCode, error) {
 	authCode := &domain.AuthorizationCode{}
 
 	err := r.db.QueryRow(ctx, `
-		SELECT code, client_id, user_id, scopes, expires_at, created_at
+		SELECT code, client_id, user_id, scopes, expires_at, created_at, code_verifier, code_challenge, code_challenge_method
 		FROM authorization_codes WHERE code = $1
-	`, code).Scan(&authCode.Code, &authCode.ClientID, &authCode.UserID, &authCode.Scopes, &authCode.ExpiresAt, &authCode.CreatedAt)
+	`, code).Scan(&authCode.Code, &authCode.ClientID, &authCode.UserID, &authCode.Scopes, &authCode.ExpiresAt, &authCode.CreatedAt, &authCode.CodeVerifier, &authCode.CodeChallenge, &authCode.CodeChallengeMethod)
 	if err != nil {
-		return nil, err
+		r.logger.Error("failed to get authorization code", zap.Error(err))
+		return nil, domain.ErrInvalidAuthorizationCode
 	}
 
 	return authCode, nil
