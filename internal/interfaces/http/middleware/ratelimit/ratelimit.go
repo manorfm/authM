@@ -52,8 +52,9 @@ func (rl *RateLimiter) cleanupVisitors() {
 	for {
 		time.Sleep(time.Minute)
 		rl.mu.Lock()
+		now := time.Now()
 		for ip, v := range rl.visitors {
-			if time.Since(v.lastSeen) > rl.ttl {
+			if now.Sub(v.lastSeen) > rl.ttl {
 				delete(rl.visitors, ip)
 			}
 		}

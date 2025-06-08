@@ -6,7 +6,6 @@ import (
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/ipede/user-manager-service/internal/application"
 	"github.com/ipede/user-manager-service/internal/domain"
 	"github.com/ipede/user-manager-service/internal/interfaces/http/dto"
 	"github.com/ipede/user-manager-service/internal/interfaces/http/errors"
@@ -15,11 +14,11 @@ import (
 )
 
 type HandlerUser struct {
-	userService *application.UserService
+	userService domain.UserService
 	logger      *zap.Logger
 }
 
-func NewUserHandler(userService *application.UserService, logger *zap.Logger) *HandlerUser {
+func NewUserHandler(userService domain.UserService, logger *zap.Logger) *HandlerUser {
 	return &HandlerUser{
 		userService: userService,
 		logger:      logger,
@@ -27,28 +26,26 @@ func NewUserHandler(userService *application.UserService, logger *zap.Logger) *H
 }
 
 func (h *HandlerUser) GetUserHandler(w http.ResponseWriter, r *http.Request) {
-	userID := chi.URLParam(r, "id")
-	if userID == "" {
-		errors.RespondWithError(w, domain.ErrInvalidField)
+	userID := getID(r, h)
+	if userID == nil {
+		errors.RespondWithError(w, domain.ErrInvalidUserID)
 		return
 	}
 
-	id, err := ulid.Parse(userID)
-	if err != nil {
-		errors.RespondWithError(w, domain.ErrInvalidField)
-		return
-	}
-
-	user, err := h.userService.GetUser(r.Context(), id)
+	user, err := h.userService.GetUser(r.Context(), *userID)
 	if err != nil {
 		h.logger.Error("failed to get user", zap.Error(err))
+		if err == domain.ErrUserNotFound {
+			errors.RespondWithError(w, domain.ErrUserNotFound)
+			return
+		}
 		errors.RespondWithError(w, domain.ErrInternal)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	response := dto.NewUserResponse(user)
-	if err := json.NewEncoder(w).Encode(response); err != nil {
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(dto.NewUserResponse(user)); err != nil {
 		h.logger.Error("failed to encode response", zap.Error(err))
 		errors.RespondWithError(w, domain.ErrInternal)
 		return
@@ -66,12 +63,14 @@ func getQueryParam(r *http.Request, key string, defaultValue int) (int, error) {
 func (h *HandlerUser) ListUsersHandler(w http.ResponseWriter, r *http.Request) {
 	limit, err := getQueryParam(r, "limit", 10)
 	if err != nil {
+		h.logger.Error("invalid limit parameter", zap.Error(err))
 		errors.RespondWithError(w, domain.ErrInvalidField)
 		return
 	}
 
 	offset, err := getQueryParam(r, "offset", 0)
 	if err != nil {
+		h.logger.Error("invalid offset parameter", zap.Error(err))
 		errors.RespondWithError(w, domain.ErrInvalidField)
 		return
 	}
@@ -79,6 +78,10 @@ func (h *HandlerUser) ListUsersHandler(w http.ResponseWriter, r *http.Request) {
 	users, err := h.userService.ListUsers(r.Context(), limit, offset)
 	if err != nil {
 		h.logger.Error("failed to list users", zap.Error(err))
+		if err == domain.ErrDatabaseQuery {
+			errors.RespondWithError(w, domain.ErrDatabaseQuery)
+			return
+		}
 		errors.RespondWithError(w, domain.ErrInternal)
 		return
 	}
@@ -89,6 +92,7 @@ func (h *HandlerUser) ListUsersHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		h.logger.Error("failed to encode response", zap.Error(err))
 		errors.RespondWithError(w, domain.ErrInternal)
@@ -96,31 +100,51 @@ func (h *HandlerUser) ListUsersHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *HandlerUser) UpdateUserHandler(w http.ResponseWriter, r *http.Request) {
+func getID(r *http.Request, h *HandlerUser) *ulid.ULID {
 	userID := chi.URLParam(r, "id")
 	if userID == "" {
-		errors.RespondWithError(w, domain.ErrInvalidField)
-		return
+		h.logger.Error("empty user ID")
+		return nil
 	}
 
 	id, err := ulid.Parse(userID)
 	if err != nil {
-		errors.RespondWithError(w, domain.ErrInvalidField)
-		return
+		h.logger.Error("invalid user ID format", zap.Error(err))
+		return nil
 	}
 
-	var req domain.UpdateUserRequest
+	return &id
+}
 
+func (h *HandlerUser) UpdateUserHandler(w http.ResponseWriter, r *http.Request) {
+	var req domain.UpdateUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.logger.Error("failed to decode request body", zap.Error(err))
 		errors.RespondWithError(w, domain.ErrInvalidRequestBody)
 		return
 	}
 
-	if err := h.userService.UpdateUser(r.Context(), id, req.Name, req.Phone); err != nil {
+	userID := getID(r, h)
+	if userID == nil {
+		errors.RespondWithError(w, domain.ErrInvalidUserID)
+		return
+	}
+
+	if err := h.userService.UpdateUser(r.Context(), *userID, req.Name, req.Phone); err != nil {
 		h.logger.Error("failed to update user", zap.Error(err))
+		if err == domain.ErrUserNotFound {
+			errors.RespondWithError(w, domain.ErrUserNotFound)
+			return
+		}
 		errors.RespondWithError(w, domain.ErrInternal)
 		return
 	}
 
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(map[string]string{"message": "User updated successfully"}); err != nil {
+		h.logger.Error("failed to encode response", zap.Error(err))
+		errors.RespondWithError(w, domain.ErrInternal)
+		return
+	}
 }

@@ -35,9 +35,6 @@ var (
 	// ErrInvalidPKCE is returned when the PKCE is invalid
 	ErrInvalidPKCE = NewBusinessError("U0005", "Invalid PKCE")
 
-	// ErrInvalidUserID is returned when the user ID is invalid
-	ErrInvalidUserID = NewBusinessError("U0006", "Invalid user ID")
-
 	// ErrNotFound is returned when a user is not found
 	errNotFound = func(t string) *BusinessError {
 		return NewBusinessError("U0007", fmt.Sprintf("%s not found", t))
@@ -177,6 +174,9 @@ var (
 	ErrInvalidTOTPBackupCode     = NewBusinessError("U0051", "Invalid TOTP backup code")
 	ErrTOTPBackupCodesExhausted  = NewBusinessError("U0052", "All TOTP backup codes have been used")
 	ErrTOTPVerificationRequired  = NewBusinessError("U0053", "TOTP verification required")
+
+	// ErrInvalidUserID is returned when the user ID is invalid
+	ErrInvalidUserID = NewBusinessError("U0054", "Invalid user ID")
 )
 
 func (e *BusinessError) GetCode() string {
