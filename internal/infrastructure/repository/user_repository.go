@@ -6,6 +6,7 @@ import (
 
 	"github.com/ipede/user-manager-service/internal/domain"
 	"github.com/ipede/user-manager-service/internal/infrastructure/database"
+	"github.com/jackc/pgx/v5"
 	"github.com/oklog/ulid/v2"
 	"go.uber.org/zap"
 )
@@ -41,6 +42,9 @@ func (r *UserRepository) FindByID(ctx context.Context, id ulid.ULID) (*domain.Us
 		FROM users WHERE id = $1
 	`, id.String()).Scan(&user.ID, &user.Name, &user.Email, &user.Password, &user.Phone, &user.CreatedAt, &user.UpdatedAt, &user.Roles, &user.EmailVerified)
 	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, domain.ErrUserNotFound
+		}
 		r.logger.Error("failed to find user by id", zap.Error(err))
 		return nil, domain.ErrDatabaseQuery
 	}
@@ -54,8 +58,11 @@ func (r *UserRepository) FindByEmail(ctx context.Context, email string) (*domain
 		FROM users WHERE email = $1
 	`, email).Scan(&user.ID, &user.Name, &user.Email, &user.Password, &user.Phone, &user.CreatedAt, &user.UpdatedAt, &user.Roles, &user.EmailVerified)
 	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, domain.ErrUserNotFound
+		}
 		r.logger.Error("failed to find user by email", zap.Error(err))
-		return nil, domain.ErrUserNotFound
+		return nil, domain.ErrDatabaseQuery
 	}
 	return user, nil
 }
@@ -64,6 +71,9 @@ func (r *UserRepository) ExistsByEmail(ctx context.Context, email string) (bool,
 	var count int
 	err := r.db.QueryRow(ctx, "SELECT COUNT(*) FROM users WHERE email = $1", email).Scan(&count)
 	if err != nil {
+		if err == pgx.ErrNoRows {
+			return false, domain.ErrUserNotFound
+		}
 		r.logger.Error("failed to check if user exists", zap.Error(err))
 		return false, domain.ErrDatabaseQuery
 	}
@@ -111,9 +121,9 @@ func (r *UserRepository) List(ctx context.Context, limit, offset int) ([]*domain
 func (r *UserRepository) Update(ctx context.Context, user *domain.User) error {
 	return r.db.Exec(ctx, `
 		UPDATE users
-		SET name = $1, phone = $2, updated_at = $3, email_verified = $4
-		WHERE id = $5
-	`, user.Name, user.Phone, user.UpdatedAt, user.EmailVerified, user.ID.String())
+		SET name = $1, phone = $3, updated_at = $4, email_verified = $5, roles = $6
+		WHERE id = $7
+	`, user.Name, user.Phone, user.UpdatedAt, user.EmailVerified, user.Roles, user.ID.String())
 }
 
 func (r *UserRepository) RemoveRole(ctx context.Context, userID ulid.ULID, role string) error {

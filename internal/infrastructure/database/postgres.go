@@ -7,6 +7,7 @@ import (
 
 	"github.com/ipede/user-manager-service/internal/infrastructure/config"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 )
@@ -58,6 +59,9 @@ func (p *Postgres) BeginTx(ctx context.Context) (pgx.Tx, error) {
 // Exec executes a query without returning any rows
 func (p *Postgres) Exec(ctx context.Context, sql string, args ...interface{}) error {
 	_, err := p.pool.Exec(ctx, sql, args...)
+	if err != nil {
+		p.log.Error("Exec error", zap.String("sql", sql), zap.Any("args", args), zap.Error(err))
+	}
 	return err
 }
 
@@ -76,4 +80,9 @@ func (p *Postgres) Ping() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return p.pool.Ping(ctx)
+}
+
+// ExecRaw executes a raw SQL query without returning any rows
+func (p *Postgres) ExecRaw(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error) {
+	return p.pool.Exec(ctx, sql, args...)
 }
