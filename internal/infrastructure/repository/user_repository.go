@@ -121,8 +121,8 @@ func (r *UserRepository) List(ctx context.Context, limit, offset int) ([]*domain
 func (r *UserRepository) Update(ctx context.Context, user *domain.User) error {
 	return r.db.Exec(ctx, `
 		UPDATE users
-		SET name = $1, phone = $3, updated_at = $4, email_verified = $5, roles = $6
-		WHERE id = $7
+		SET name = $1, phone = $2, updated_at = $3, email_verified = $4, roles = $5
+		WHERE id = $6
 	`, user.Name, user.Phone, user.UpdatedAt, user.EmailVerified, user.Roles, user.ID.String())
 }
 

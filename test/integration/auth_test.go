@@ -145,7 +145,7 @@ func TestAuthService_Integration(t *testing.T) {
 	logger := zap.NewNop()
 
 	// Setup test container with migrations
-	container, cfg := setupTestContainerWithMigrations(t)
+	container, cfg := setupTestContainer(t)
 	defer container.Terminate(ctx)
 
 	// Setup database
@@ -230,8 +230,17 @@ func TestAuthService_Integration(t *testing.T) {
 	})
 
 	t.Run("Invalid Login Attempts", func(t *testing.T) {
+		// Create a new user for invalid login test
+		user, err := authService.Register(ctx, "Invalid Login User", "invalid@example.com", "password123", "5555555555")
+		require.NoError(t, err)
+		assert.NotNil(t, user)
+
+		// Verify email
+		err = authService.VerifyEmail(ctx, "invalid@example.com", emailSvc.verificationCode)
+		require.NoError(t, err)
+
 		// Try to login with invalid credentials
-		_, err := authService.Login(ctx, "test@example.com", "wrongpassword")
+		_, err = authService.Login(ctx, "invalid@example.com", "wrongpassword")
 		assert.ErrorIs(t, err, domain.ErrInvalidCredentials)
 	})
 }
