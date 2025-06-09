@@ -19,12 +19,12 @@ type MockTOTPService struct {
 	mock.Mock
 }
 
-func (m *MockTOTPService) EnableTOTP(userID string) (*domain.TOTPConfig, []string, error) {
+func (m *MockTOTPService) EnableTOTP(userID string) (*domain.TOTP, error) {
 	args := m.Called(userID)
 	if args.Get(0) == nil {
-		return nil, nil, args.Error(2)
+		return nil, args.Error(1)
 	}
-	return args.Get(0).(*domain.TOTPConfig), args.Get(1).([]string), args.Error(2)
+	return args.Get(0).(*domain.TOTP), args.Error(1)
 }
 
 func (m *MockTOTPService) VerifyTOTP(userID, code string) error {
@@ -42,6 +42,11 @@ func (m *MockTOTPService) DisableTOTP(userID string) error {
 	return args.Error(0)
 }
 
+func (m *MockTOTPService) GetTOTPSecret(ctx context.Context, userID string) (string, error) {
+	args := m.Called(ctx, userID)
+	return args.String(0), args.Error(1)
+}
+
 func TestTOTPHandler_EnableTOTP(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -55,15 +60,14 @@ func TestTOTPHandler_EnableTOTP(t *testing.T) {
 			userID: "test-user",
 			mockSetup: func(m *MockTOTPService) {
 				m.On("EnableTOTP", "test-user").Return(
-					&domain.TOTPConfig{Secret: "test-secret"},
-					[]string{"backup1", "backup2"},
+					&domain.TOTP{QRCode: "test-secret", BackupCodes: []string{"backup1", "backup2"}},
 					nil,
 				)
 			},
 			expectedStatus: http.StatusOK,
 			expectedBody: map[string]interface{}{
-				"qr_code":      "test-secret",
-				"backup_codes": []string{"backup1", "backup2"},
+				"QRCode":      "test-secret",
+				"BackupCodes": []string{"backup1", "backup2"},
 			},
 		},
 		{
@@ -71,7 +75,6 @@ func TestTOTPHandler_EnableTOTP(t *testing.T) {
 			userID: "test-user",
 			mockSetup: func(m *MockTOTPService) {
 				m.On("EnableTOTP", "test-user").Return(
-					nil,
 					nil,
 					domain.ErrTOTPAlreadyEnabled,
 				)
@@ -125,15 +128,15 @@ func TestTOTPHandler_EnableTOTP(t *testing.T) {
 			err := json.Unmarshal(w.Body.Bytes(), &response)
 			assert.NoError(t, err)
 
-			if codes, ok := response["backup_codes"]; ok {
+			if codes, ok := response["BackupCodes"]; ok {
 				// Convert []interface{} to []string for comparison
 				actualCodes := make([]string, len(codes.([]interface{})))
 				for i, v := range codes.([]interface{}) {
 					actualCodes[i] = v.(string)
 				}
-				assert.ElementsMatch(t, tt.expectedBody["backup_codes"].([]string), actualCodes)
-				delete(response, "backup_codes")
-				delete(tt.expectedBody, "backup_codes")
+				assert.ElementsMatch(t, tt.expectedBody["BackupCodes"].([]string), actualCodes)
+				delete(response, "BackupCodes")
+				delete(tt.expectedBody, "BackupCodes")
 			}
 			assert.Equal(t, tt.expectedBody, response)
 

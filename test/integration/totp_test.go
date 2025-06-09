@@ -68,17 +68,22 @@ func TestTOTPService_Integration(t *testing.T) {
 
 		t.Logf("Enabling TOTP for user ID: %s", user.ID.String())
 		// Enable TOTP
-		config, backupCodes, err := totpService.EnableTOTP(user.ID.String())
+		totp, err := totpService.EnableTOTP(user.ID.String())
 		if err != nil {
 			t.Logf("EnableTOTP error: %+v", err)
 		}
 		require.NoError(t, err)
-		assert.NotNil(t, config)
-		assert.NotEmpty(t, backupCodes)
-		assert.Len(t, backupCodes, 10)
+		assert.NotNil(t, totp.QRCode)
+		assert.NotEmpty(t, totp.BackupCodes)
+		assert.Len(t, totp.BackupCodes, 10)
+
+		// Retrieve the TOTP secret
+		secret, err := totpService.GetTOTPSecret(ctx, user.ID.String())
+		require.NoError(t, err)
+		assert.NotEmpty(t, secret)
 
 		// Generate a valid TOTP code
-		code, err := extotp.GenerateCode(config.Secret, time.Now())
+		code, err := extotp.GenerateCode(secret, time.Now())
 		require.NoError(t, err)
 		assert.NotEmpty(t, code)
 
@@ -87,7 +92,7 @@ func TestTOTPService_Integration(t *testing.T) {
 		require.NoError(t, err)
 
 		// Verify backup code
-		err = totpService.VerifyBackupCode(user.ID.String(), backupCodes[0])
+		err = totpService.VerifyBackupCode(user.ID.String(), totp.BackupCodes[0])
 		require.NoError(t, err)
 
 		// Disable TOTP
@@ -101,7 +106,7 @@ func TestTOTPService_Integration(t *testing.T) {
 
 	t.Run("Invalid TOTP Operations", func(t *testing.T) {
 		// Try to enable TOTP for non-existent user
-		_, _, err := totpService.EnableTOTP("non-existent")
+		_, err := totpService.EnableTOTP("non-existent")
 		assert.ErrorIs(t, err, domain.ErrDatabaseQuery)
 
 		// Try to verify TOTP for non-existent user
@@ -130,7 +135,7 @@ func TestTOTPService_Integration(t *testing.T) {
 		require.NoError(t, err)
 
 		// Enable TOTP
-		_, backupCodes, err := totpService.EnableTOTP(user.ID.String())
+		totp, err := totpService.EnableTOTP(user.ID.String())
 		require.NoError(t, err)
 
 		// Try invalid TOTP code
@@ -142,9 +147,9 @@ func TestTOTPService_Integration(t *testing.T) {
 		assert.ErrorIs(t, err, domain.ErrInvalidTOTPBackupCode)
 
 		// Try reusing a backup code
-		err = totpService.VerifyBackupCode(user.ID.String(), backupCodes[0])
+		err = totpService.VerifyBackupCode(user.ID.String(), totp.BackupCodes[0])
 		require.NoError(t, err)
-		err = totpService.VerifyBackupCode(user.ID.String(), backupCodes[0])
+		err = totpService.VerifyBackupCode(user.ID.String(), totp.BackupCodes[0])
 		assert.ErrorIs(t, err, domain.ErrInvalidTOTPBackupCode)
 	})
 
@@ -165,11 +170,16 @@ func TestTOTPService_Integration(t *testing.T) {
 		require.NoError(t, err)
 
 		// Enable TOTP first time
-		config1, backupCodes1, err := totpService.EnableTOTP(user.ID.String())
+		totp1, err := totpService.EnableTOTP(user.ID.String())
 		require.NoError(t, err)
 
+		// Store the first secret
+		secret1, err := totpService.GetTOTPSecret(ctx, user.ID.String())
+		require.NoError(t, err)
+		assert.NotEmpty(t, secret1)
+
 		// Try to enable TOTP again
-		_, _, err = totpService.EnableTOTP(user.ID.String())
+		_, err = totpService.EnableTOTP(user.ID.String())
 		assert.ErrorIs(t, err, domain.ErrTOTPAlreadyEnabled)
 
 		// Disable TOTP
@@ -177,21 +187,29 @@ func TestTOTPService_Integration(t *testing.T) {
 		require.NoError(t, err)
 
 		// Enable TOTP second time
-		config2, backupCodes2, err := totpService.EnableTOTP(user.ID.String())
+		totp2, err := totpService.EnableTOTP(user.ID.String())
 		require.NoError(t, err)
+
+		// Retrieve the new secret
+		secret2, err := totpService.GetTOTPSecret(ctx, user.ID.String())
+		require.NoError(t, err)
+		assert.NotEmpty(t, secret2)
 
 		// Verify new configuration is different
-		assert.NotEqual(t, config1.Secret, config2.Secret)
-		assert.NotEqual(t, backupCodes1, backupCodes2)
+		assert.NotEqual(t, totp1.QRCode, totp2.QRCode)
+		assert.NotEqual(t, totp1.BackupCodes, totp2.BackupCodes)
 
 		// Verify old TOTP code doesn't work
-		oldCode, err := extotp.GenerateCode(config1.Secret, time.Now())
+		oldCode, err := extotp.GenerateCode(secret1, time.Now())
 		require.NoError(t, err)
 		err = totpService.VerifyTOTP(user.ID.String(), oldCode)
+		if err != nil {
+			t.Logf("Returned error when verifying old TOTP code: %v", err)
+		}
 		assert.ErrorIs(t, err, domain.ErrInvalidTOTPCode)
 
 		// Verify new TOTP code works
-		newCode, err := extotp.GenerateCode(config2.Secret, time.Now())
+		newCode, err := extotp.GenerateCode(secret2, time.Now())
 		require.NoError(t, err)
 		err = totpService.VerifyTOTP(user.ID.String(), newCode)
 		require.NoError(t, err)

@@ -250,6 +250,36 @@ func (m *mockJWTError) TryVault() error {
 	return nil
 }
 
+// Mock TOTPService for testing
+type mockTOTPService struct {
+	mock.Mock
+}
+
+func (m *mockTOTPService) EnableTOTP(userID string) (*domain.TOTP, error) {
+	args := m.Called(userID)
+	return args.Get(0).(*domain.TOTP), args.Error(1)
+}
+
+func (m *mockTOTPService) VerifyTOTP(userID, code string) error {
+	args := m.Called(userID, code)
+	return args.Error(0)
+}
+
+func (m *mockTOTPService) VerifyBackupCode(userID, code string) error {
+	args := m.Called(userID, code)
+	return args.Error(0)
+}
+
+func (m *mockTOTPService) DisableTOTP(userID string) error {
+	args := m.Called(userID)
+	return args.Error(0)
+}
+
+func (m *mockTOTPService) GetTOTPSecret(ctx context.Context, userID string) (string, error) {
+	args := m.Called(ctx, userID)
+	return args.String(0), args.Error(1)
+}
+
 // Mock JWT para simular erro de parsing do userID
 type mockJWTInvalidUserID struct{}
 
@@ -335,31 +365,33 @@ func TestOIDCService_GetUserInfo(t *testing.T) {
 	tests := []struct {
 		name          string
 		userID        ulid.ULID
-		mockSetup     func(*mockUserRepository)
+		mockSetup     func(*mockUserRepository, *mockTOTPService)
 		expectedError error
-		expectedInfo  map[string]interface{}
+		expectedInfo  *domain.UserInfo
 	}{
 		{
 			name:   "successful user info retrieval",
 			userID: userID,
-			mockSetup: func(m *mockUserRepository) {
+			mockSetup: func(m *mockUserRepository, t *mockTOTPService) {
 				m.On("FindByID", mock.Anything, userID).Return(&domain.User{
 					ID:    userID,
 					Name:  "Test User",
 					Email: "test@example.com",
 				}, nil)
+				t.On("GetTOTPSecret", mock.Anything, userID.String()).Return("", domain.ErrTOTPNotEnabled)
 			},
-			expectedInfo: map[string]interface{}{
-				"sub":            userID.String(),
-				"name":           "Test User",
-				"email":          "test@example.com",
-				"email_verified": true,
+			expectedInfo: &domain.UserInfo{
+				Sub:           userID.String(),
+				Name:          "Test User",
+				Email:         "test@example.com",
+				EmailVerified: true,
+				AMR:           []string{"pwd"},
 			},
 		},
 		{
 			name:   "user not found",
 			userID: ulid.MustParse("01ARZ3NDEKTSV4RRFFQ69G5FAW"),
-			mockSetup: func(m *mockUserRepository) {
+			mockSetup: func(m *mockUserRepository, t *mockTOTPService) {
 				m.On("FindByID", mock.Anything, ulid.MustParse("01ARZ3NDEKTSV4RRFFQ69G5FAW")).Return(nil, domain.ErrUserNotFound)
 			},
 			expectedError: domain.ErrUserNotFound,
@@ -370,12 +402,13 @@ func TestOIDCService_GetUserInfo(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mockUserRepo := new(mockUserRepository)
 			mockOAuth2Service := new(mockOAuth2Service)
-			tt.mockSetup(mockUserRepo)
+			mockTOTPService := new(mockTOTPService)
+			tt.mockSetup(mockUserRepo, mockTOTPService)
 			cfg, err := config.LoadConfig(zap.NewNop())
 			if err != nil {
 				t.Fatalf("Failed to load config: %v", err)
 			}
-			service := NewOIDCService(mockOAuth2Service, nil, mockUserRepo, cfg, zap.NewNop())
+			service := NewOIDCService(mockOAuth2Service, nil, mockUserRepo, mockTOTPService, cfg, zap.NewNop())
 
 			info, err := service.GetUserInfo(context.Background(), tt.userID.String())
 
@@ -389,6 +422,7 @@ func TestOIDCService_GetUserInfo(t *testing.T) {
 			}
 
 			mockUserRepo.AssertExpectations(t)
+			mockTOTPService.AssertExpectations(t)
 		})
 	}
 }
@@ -526,13 +560,14 @@ func TestOIDCService_Authorize(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockOAuth2 := new(mockOAuth2Service)
+			mockTOTPService := new(mockTOTPService)
 			tt.setupMocks(mockOAuth2)
 
 			cfg, err := config.LoadConfig(zap.NewNop())
 			if err != nil {
 				t.Fatalf("Failed to load config: %v", err)
 			}
-			service := NewOIDCService(mockOAuth2, nil, nil, cfg, zap.NewNop())
+			service := NewOIDCService(mockOAuth2, nil, nil, mockTOTPService, cfg, zap.NewNop())
 			code, err := service.Authorize(tt.setupCtx(context.Background()), tt.clientID, tt.redirectURI, tt.state, tt.scope)
 
 			if tt.wantErr != nil {
@@ -588,6 +623,7 @@ func TestOIDCService_ExchangeCode(t *testing.T) {
 			mockOAuth2Service := new(mockOAuth2Service)
 			mockUserRepo := new(mockUserRepository)
 			mockJWT := &mockJWTRefresh{}
+			mockTOTPService := new(mockTOTPService)
 
 			tt.mockSetup(mockOAuth2Service)
 			if tt.name == "successful code exchange" {
@@ -603,7 +639,7 @@ func TestOIDCService_ExchangeCode(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Failed to load config: %v", err)
 			}
-			service := NewOIDCService(mockOAuth2Service, mockJWT, mockUserRepo, cfg, logger)
+			service := NewOIDCService(mockOAuth2Service, mockJWT, mockUserRepo, mockTOTPService, cfg, logger)
 
 			token, err := service.ExchangeCode(context.Background(), tt.code, tt.codeVerifier)
 
@@ -661,6 +697,7 @@ func TestOIDCService_GetOpenIDConfiguration(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockOAuth2Service := new(mockOAuth2Service)
+			mockTOTPService := new(mockTOTPService)
 			tt.mockSetup(mockOAuth2Service)
 
 			var cfg *config.Config
@@ -672,7 +709,7 @@ func TestOIDCService_GetOpenIDConfiguration(t *testing.T) {
 				}
 			}
 
-			service := NewOIDCService(mockOAuth2Service, nil, nil, cfg, zap.NewNop())
+			service := NewOIDCService(mockOAuth2Service, nil, nil, mockTOTPService, cfg, zap.NewNop())
 
 			config, err := service.GetOpenIDConfiguration(context.Background())
 
@@ -759,6 +796,7 @@ func TestOIDCService_RefreshToken(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mockUserRepo := new(mockUserRepository)
 			mockOAuth2Service := new(mockOAuth2Service)
+			mockTOTPService := new(mockTOTPService)
 			var jwtService domain.JWTService
 			switch tt.name {
 			case "successful token refresh":
@@ -778,7 +816,7 @@ func TestOIDCService_RefreshToken(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Failed to load config: %v", err)
 			}
-			service := NewOIDCService(mockOAuth2Service, jwtService, mockUserRepo, cfg, logger)
+			service := NewOIDCService(mockOAuth2Service, jwtService, mockUserRepo, mockTOTPService, cfg, logger)
 
 			token, err := service.RefreshToken(context.Background(), tt.refreshToken)
 

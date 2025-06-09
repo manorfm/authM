@@ -68,7 +68,7 @@ func (m *MockOAuth2Repository) DeleteAuthorizationCode(ctx context.Context, code
 	return args.Error(0)
 }
 
-func setupTest(t *testing.T) (*OAuth2Handler, *MockOAuth2Repository) {
+func setupTest() (*OAuth2Handler, *MockOAuth2Repository) {
 	logger, _ := zap.NewDevelopment()
 	mockRepo := new(MockOAuth2Repository)
 	handler := NewOAuth2Handler(mockRepo, logger)
@@ -142,7 +142,7 @@ func TestCreateClientHandler(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler, mockRepo := setupTest(t)
+			handler, mockRepo := setupTest()
 			tt.mockSetup(mockRepo)
 
 			body, _ := json.Marshal(tt.requestBody)
@@ -229,7 +229,7 @@ func TestUpdateClientHandler(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler, mockRepo := setupTest(t)
+			handler, mockRepo := setupTest()
 			tt.mockSetup(mockRepo)
 
 			body, _ := json.Marshal(tt.requestBody)
@@ -299,7 +299,7 @@ func TestDeleteClientHandler(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler, mockRepo := setupTest(t)
+			handler, mockRepo := setupTest()
 			tt.mockSetup(mockRepo)
 
 			req := httptest.NewRequest(http.MethodDelete, "/oauth2/clients/"+tt.clientID, nil)
@@ -381,7 +381,7 @@ func TestListClientsHandler(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler, mockRepo := setupTest(t)
+			handler, mockRepo := setupTest()
 			tt.mockSetup(mockRepo)
 
 			req := httptest.NewRequest(http.MethodGet, "/oauth2/clients", nil)
@@ -445,7 +445,7 @@ func TestGetClientHandler(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler, mockRepo := setupTest(t)
+			handler, mockRepo := setupTest()
 			tt.mockSetup(mockRepo)
 
 			req := httptest.NewRequest(http.MethodGet, "/oauth2/clients/"+tt.clientID, nil)

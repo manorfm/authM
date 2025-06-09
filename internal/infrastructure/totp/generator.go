@@ -39,14 +39,15 @@ func (g *Generator) GenerateSecret() (string, error) {
 
 // GenerateQRCode generates a QR code URL for TOTP configuration
 func (g *Generator) GenerateQRCode(config *domain.TOTPConfig) (string, error) {
-	// Format the account name
+	// Format the account name and secret
 	accountName := strings.ReplaceAll(config.AccountName, ":", "%3A")
+	secret := strings.ReplaceAll(config.Secret, "=", "")
 
 	// Generate the TOTP URL
 	url := fmt.Sprintf("otpauth://totp/%s:%s?secret=%s&issuer=%s&algorithm=%s&digits=%d&period=%d",
 		config.Issuer,
 		accountName,
-		config.Secret,
+		secret,
 		config.Issuer,
 		config.Algorithm,
 		config.Digits,

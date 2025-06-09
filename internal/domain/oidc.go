@@ -4,10 +4,18 @@ import (
 	"context"
 )
 
+type UserInfo struct {
+	Sub           string   `json:"sub"`
+	Name          string   `json:"name"`
+	Email         string   `json:"email"`
+	EmailVerified bool     `json:"email_verified"`
+	AMR           []string `json:"amr"`
+}
+
 // OIDCService defines the interface for OpenID Connect operations
 type OIDCService interface {
 	// GetUserInfo retrieves user information for the given user ID
-	GetUserInfo(ctx context.Context, userID string) (map[string]interface{}, error)
+	GetUserInfo(ctx context.Context, userID string) (*UserInfo, error)
 
 	// GetOpenIDConfiguration retrieves the OpenID Connect configuration
 	GetOpenIDConfiguration(ctx context.Context) (map[string]interface{}, error)

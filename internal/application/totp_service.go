@@ -25,16 +25,16 @@ func NewTOTPService(repo domain.TOTPRepository, generator domain.TOTPGenerator, 
 }
 
 // EnableTOTP enables TOTP for a user
-func (s *totpServiceImpl) EnableTOTP(userID string) (*domain.TOTPConfig, []string, error) {
+func (s *totpServiceImpl) EnableTOTP(userID string) (*domain.TOTP, error) {
 	secret, err := s.repo.GetTOTPSecret(context.Background(), userID)
 	if err != nil && err != domain.ErrTOTPNotEnabled {
 		s.logger.Error("Failed to get TOTP secret",
 			zap.String("user_id", userID),
 			zap.Error(err))
-		return nil, nil, err
+		return nil, err
 	}
 	if secret != "" {
-		return nil, nil, domain.ErrTOTPAlreadyEnabled
+		return nil, domain.ErrTOTPAlreadyEnabled
 	}
 
 	secret, err = s.generator.GenerateSecret()
@@ -42,7 +42,7 @@ func (s *totpServiceImpl) EnableTOTP(userID string) (*domain.TOTPConfig, []strin
 		s.logger.Error("Failed to generate TOTP secret",
 			zap.String("user_id", userID),
 			zap.Error(err))
-		return nil, nil, err
+		return nil, err
 	}
 
 	backupCodes, err := s.generator.GenerateBackupCodes(10)
@@ -50,21 +50,21 @@ func (s *totpServiceImpl) EnableTOTP(userID string) (*domain.TOTPConfig, []strin
 		s.logger.Error("Failed to generate backup codes",
 			zap.String("user_id", userID),
 			zap.Error(err))
-		return nil, nil, err
+		return nil, err
 	}
 
 	if err := s.repo.SaveTOTPSecret(context.Background(), userID, secret); err != nil {
 		s.logger.Error("Failed to save TOTP secret",
 			zap.String("user_id", userID),
 			zap.Error(err))
-		return nil, nil, err
+		return nil, err
 	}
 
 	if err := s.repo.SaveBackupCodes(context.Background(), userID, backupCodes); err != nil {
 		s.logger.Error("Failed to save backup codes",
 			zap.String("user_id", userID),
 			zap.Error(err))
-		return nil, nil, err
+		return nil, err
 	}
 
 	config := &domain.TOTPConfig{
@@ -76,7 +76,14 @@ func (s *totpServiceImpl) EnableTOTP(userID string) (*domain.TOTPConfig, []strin
 		Algorithm:   "SHA1",
 	}
 
-	return config, backupCodes, nil
+	qrCode, err := s.generator.GenerateQRCode(config)
+	if err != nil {
+		s.logger.Error("Failed to generate QR code",
+			zap.String("user_id", userID),
+			zap.Error(err))
+		return nil, err
+	}
+	return &domain.TOTP{QRCode: qrCode, BackupCodes: backupCodes}, nil
 }
 
 // VerifyTOTP verifies a TOTP code for a user
@@ -148,4 +155,18 @@ func (s *totpServiceImpl) DisableTOTP(userID string) error {
 	}
 
 	return nil
+}
+
+// GetTOTPSecret retrieves the TOTP secret for a user
+func (s *totpServiceImpl) GetTOTPSecret(ctx context.Context, userID string) (string, error) {
+	secret, err := s.repo.GetTOTPSecret(ctx, userID)
+	if err != nil {
+		if err != domain.ErrTOTPNotEnabled {
+			s.logger.Error("Failed to get TOTP secret",
+				zap.String("user_id", userID),
+				zap.Error(err))
+		}
+		return "", err
+	}
+	return secret, nil
 }

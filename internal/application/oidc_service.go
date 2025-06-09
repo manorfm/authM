@@ -14,21 +14,23 @@ type OIDCService struct {
 	oauth2Service domain.OAuth2Service
 	jwtService    domain.JWTService
 	userRepo      domain.UserRepository
+	totpService   domain.TOTPService
 	config        *config.Config
 	logger        *zap.Logger
 }
 
-func NewOIDCService(oauth2Service domain.OAuth2Service, jwtService domain.JWTService, userRepo domain.UserRepository, config *config.Config, logger *zap.Logger) *OIDCService {
+func NewOIDCService(oauth2Service domain.OAuth2Service, jwtService domain.JWTService, userRepo domain.UserRepository, totpService domain.TOTPService, config *config.Config, logger *zap.Logger) *OIDCService {
 	return &OIDCService{
 		oauth2Service: oauth2Service,
 		jwtService:    jwtService,
 		userRepo:      userRepo,
+		totpService:   totpService,
 		config:        config,
 		logger:        logger,
 	}
 }
 
-func (s *OIDCService) GetUserInfo(ctx context.Context, userID string) (map[string]interface{}, error) {
+func (s *OIDCService) GetUserInfo(ctx context.Context, userID string) (*domain.UserInfo, error) {
 	s.logger.Debug("Getting user info",
 		zap.String("user_id", userID))
 
@@ -51,12 +53,22 @@ func (s *OIDCService) GetUserInfo(ctx context.Context, userID string) (map[strin
 	}
 
 	// Return user info
-	return map[string]interface{}{
-		"sub":            user.ID.String(),
-		"name":           user.Name,
-		"email":          user.Email,
-		"email_verified": true,
+	return &domain.UserInfo{
+		Sub:           user.ID.String(),
+		Name:          user.Name,
+		Email:         user.Email,
+		EmailVerified: true,
+		AMR:           s.getAMR(user),
 	}, nil
+}
+
+func (s *OIDCService) getAMR(user *domain.User) []string {
+	amr := []string{"pwd"}
+	secret, err := s.totpService.GetTOTPSecret(context.Background(), user.ID.String())
+	if err == nil && secret != "" {
+		amr = append(amr, "mfa")
+	}
+	return amr
 }
 
 func (s *OIDCService) GetOpenIDConfiguration(ctx context.Context) (map[string]interface{}, error) {

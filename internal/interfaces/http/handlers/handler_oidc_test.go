@@ -159,12 +159,12 @@ type mockOIDCService struct {
 	mock.Mock
 }
 
-func (m *mockOIDCService) GetUserInfo(ctx context.Context, userID string) (map[string]interface{}, error) {
+func (m *mockOIDCService) GetUserInfo(ctx context.Context, userID string) (*domain.UserInfo, error) {
 	args := m.Called(ctx, userID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(map[string]interface{}), args.Error(1)
+	return args.Get(0).(*domain.UserInfo), args.Error(1)
 }
 
 func (m *mockOIDCService) GetJWKS(ctx context.Context) (map[string]interface{}, error) {
@@ -204,7 +204,7 @@ func (m *mockOIDCService) Authorize(ctx context.Context, clientID, redirectURI, 
 	return args.String(0), args.Error(1)
 }
 
-func getJWTService(t *testing.T) domain.JWTService {
+func getJWTService() domain.JWTService {
 	logger := zap.NewNop()
 	cfg := &config.Config{
 		DBHost:             "localhost",
@@ -284,7 +284,7 @@ func TestHandleOpenIDConfiguration(t *testing.T) {
 			// Create mock service
 			mockService := new(mockOIDCService)
 			tt.mockSetup(mockService)
-			jwtService := getJWTService(t)
+			jwtService := getJWTService()
 
 			// Create handler with mock service
 			handler := NewOIDCHandler(mockService, jwtService, zap.NewNop())
@@ -319,7 +319,7 @@ func TestHandleJWKS(t *testing.T) {
 	}{
 		{
 			name:           "successful JWKS response",
-			jwtService:     getJWTService(t),
+			jwtService:     getJWTService(),
 			expectedStatus: http.StatusOK,
 			expectedBody: map[string]interface{}{
 				"keys": []map[string]interface{}{
@@ -435,7 +435,7 @@ func (m *mockJWTService) TryVault() error {
 func TestHandleAuthorize(t *testing.T) {
 	logger, _ := zap.NewProduction()
 	mockService := new(mockOIDCService)
-	jwtService := getJWTService(t)
+	jwtService := getJWTService()
 	handler := NewOIDCHandler(mockService, jwtService, logger)
 
 	tests := []struct {
@@ -646,7 +646,7 @@ func TestHandleAuthorize(t *testing.T) {
 func TestHandleToken(t *testing.T) {
 	logger, _ := zap.NewProduction()
 	mockService := new(mockOIDCService)
-	jwtService := getJWTService(t)
+	jwtService := getJWTService()
 	handler := NewOIDCHandler(mockService, jwtService, logger)
 
 	tests := []struct {
@@ -844,7 +844,7 @@ func TestHandleToken(t *testing.T) {
 func TestHandleUserInfo(t *testing.T) {
 	logger, _ := zap.NewProduction()
 	mockService := new(mockOIDCService)
-	jwtService := getJWTService(t)
+	jwtService := getJWTService()
 	handler := NewOIDCHandler(mockService, jwtService, logger)
 
 	tests := []struct {
@@ -874,11 +874,12 @@ func TestHandleUserInfo(t *testing.T) {
 			userID:     "user123",
 			mockSetup: func() {
 				mockService.On("GetUserInfo", mock.Anything, "user123").
-					Return(map[string]interface{}{
-						"sub":            "user123",
-						"name":           "Test User",
-						"email":          "test@example.com",
-						"email_verified": true,
+					Return(&domain.UserInfo{
+						Sub:           "user123",
+						Name:          "Test User",
+						Email:         "test@example.com",
+						EmailVerified: true,
+						AMR:           []string{"pwd"},
 					}, nil)
 			},
 			expectedStatus: http.StatusOK,
@@ -887,6 +888,7 @@ func TestHandleUserInfo(t *testing.T) {
 				"name":           "Test User",
 				"email":          "test@example.com",
 				"email_verified": true,
+				"amr":            []interface{}{"pwd"},
 			},
 		},
 		{
@@ -942,7 +944,7 @@ func TestHandleUserInfo(t *testing.T) {
 func TestOIDCHandler_TokenHandler(t *testing.T) {
 	logger := zap.NewNop()
 	mockService := new(mockOIDCService)
-	jwtService := getJWTService(t)
+	jwtService := getJWTService()
 	handler := NewOIDCHandler(mockService, jwtService, logger)
 
 	tests := []struct {
@@ -1005,7 +1007,7 @@ func TestOIDCHandler_TokenHandler(t *testing.T) {
 			body, err := json.Marshal(tt.requestBody)
 			assert.NoError(t, err)
 
-			req := httptest.NewRequest("POST", "/token", bytes.NewBuffer(body))
+			req := httptest.NewRequest("POST", "/oauth2/token", bytes.NewBuffer(body))
 			req.Header.Set("Content-Type", "application/json")
 
 			w := httptest.NewRecorder()
@@ -1029,7 +1031,7 @@ func TestOIDCHandler_TokenHandler(t *testing.T) {
 func TestOIDCHandler_GetOpenIDConfigurationHandler(t *testing.T) {
 	logger, _ := zap.NewProduction()
 	mockService := new(mockOIDCService)
-	jwtService := getJWTService(t)
+	jwtService := getJWTService()
 	handler := NewOIDCHandler(mockService, jwtService, logger)
 
 	tests := []struct {
@@ -1117,7 +1119,7 @@ func TestOIDCHandler_GetOpenIDConfigurationHandler(t *testing.T) {
 func TestOIDCHandler_AuthorizeHandler(t *testing.T) {
 	logger, _ := zap.NewProduction()
 	mockService := new(mockOIDCService)
-	jwtService := getJWTService(t)
+	jwtService := getJWTService()
 	handler := NewOIDCHandler(mockService, jwtService, logger)
 
 	tests := []struct {

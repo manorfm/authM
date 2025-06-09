@@ -1,4 +1,4 @@
-package http
+package router
 
 import (
 	"net/http"
@@ -16,6 +16,7 @@ import (
 	"github.com/ipede/user-manager-service/internal/interfaces/http/handlers"
 	"github.com/ipede/user-manager-service/internal/interfaces/http/middleware/auth"
 	"github.com/ipede/user-manager-service/internal/interfaces/http/middleware/ratelimit"
+	httptotp "github.com/ipede/user-manager-service/internal/interfaces/http/middleware/totp"
 	httpSwagger "github.com/swaggo/http-swagger"
 	"go.uber.org/zap"
 )
@@ -33,31 +34,36 @@ func NewRouter(
 	strategy := jwt.NewCompositeStrategy(cfg, logger)
 	jwtService := jwt.NewJWTService(strategy, cfg, logger)
 	authMiddleware := auth.NewAuthMiddleware(jwtService, logger)
+	rateLimiter := ratelimit.NewRateLimiter(100, 200, 3*time.Minute)
+
 	userRepo := repository.NewUserRepository(db, logger)
 	oauthRepo := repository.NewOAuth2Repository(db, logger)
 	verificationRepo := repository.NewVerificationCodeRepository(db, logger)
+	totpRepo := repository.NewTOTPRepository(db, logger)
+
+	totpGenerator := totp.NewGenerator(logger)
 	emailTemplate := email.NewEmailTemplate(&cfg.SMTP, logger)
+
+	totpService := application.NewTOTPService(totpRepo, totpGenerator, logger)
 	userService := application.NewUserService(userRepo, logger)
 	authService := application.NewAuthService(userRepo, verificationRepo, jwtService, emailTemplate, logger)
 	oauth2Service := application.NewOAuth2Service(oauthRepo, logger)
-	oidcService := application.NewOIDCService(oauth2Service, jwtService, userRepo, cfg, logger)
-
-	totpRepo := repository.NewTOTPRepository(db, logger)
-	totpGenerator := totp.NewGenerator(logger)
-	totpService := application.NewTOTPService(totpRepo, totpGenerator, logger)
-	totpHandler := handlers.NewTOTPHandler(totpService, logger)
+	oidcService := application.NewOIDCService(oauth2Service, jwtService, userRepo, totpService, cfg, logger)
 
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(authService, logger)
 	userHandler := handlers.NewUserHandler(userService, logger)
 	oidcHandler := handlers.NewOIDCHandler(oidcService, jwtService, logger)
 	oauth2Handler := handlers.NewOAuth2Handler(oauthRepo, logger)
+	totpHandler := handlers.NewTOTPHandler(totpService, logger)
 
 	// Create router with middleware
 	router := createRouter()
 
-	rateLimiter := ratelimit.NewRateLimiter(100, 200, 3*time.Minute)
 	router.Use(rateLimiter.Middleware)
+
+	// Initialize TOTP middleware
+	totpMiddleware := httptotp.NewMiddleware(totpService, logger)
 
 	// Health check endpoints
 	router.Group(func(r chi.Router) {
@@ -129,6 +135,11 @@ func NewRouter(
 		// Protected routes
 		r.Group(func(r chi.Router) {
 			r.Use(authMiddleware.Authenticator)
+			r.Use(totpMiddleware.Verifier)
+
+			// TOTP verification endpoint
+			r.Post("/totp/verify", totpMiddleware.VerificationHandler)
+
 			r.Get("/users/{id}", userHandler.GetUserHandler)
 			r.Put("/users/{id}", userHandler.UpdateUserHandler)
 			r.Get("/oauth2/authorize", oidcHandler.AuthorizeHandler)

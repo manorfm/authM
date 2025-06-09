@@ -21,6 +21,11 @@ type TOTPBackupCodes struct {
 	Used  []bool
 }
 
+type TOTP struct {
+	QRCode      string
+	BackupCodes []string
+}
+
 // TOTPRepository defines the interface for TOTP data access
 type TOTPRepository interface {
 	// SaveTOTPSecret saves the TOTP secret for a user
@@ -53,8 +58,9 @@ type TOTPGenerator interface {
 
 // TOTPService defines the interface for TOTP operations
 type TOTPService interface {
-	EnableTOTP(userID string) (*TOTPConfig, []string, error)
+	EnableTOTP(userID string) (*TOTP, error)
 	VerifyTOTP(userID, code string) error
 	VerifyBackupCode(userID, code string) error
 	DisableTOTP(userID string) error
+	GetTOTPSecret(ctx context.Context, userID string) (string, error)
 }

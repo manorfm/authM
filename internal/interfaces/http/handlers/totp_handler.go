@@ -32,7 +32,7 @@ func (h *TOTPHandler) EnableTOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	config, backupCodes, err := h.service.EnableTOTP(userID)
+	totp, err := h.service.EnableTOTP(userID)
 	if err != nil {
 		h.logger.Error("Failed to enable TOTP",
 			zap.String("user_id", userID),
@@ -42,10 +42,7 @@ func (h *TOTPHandler) EnableTOTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
-		"qr_code":      config.Secret,
-		"backup_codes": backupCodes,
-	}); err != nil {
+	if err := json.NewEncoder(w).Encode(totp); err != nil {
 		h.logger.Error("Failed to encode response", zap.Error(err))
 		errors.RespondWithError(w, domain.ErrInternal)
 		return

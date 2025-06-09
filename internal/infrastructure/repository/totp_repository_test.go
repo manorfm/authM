@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/ipede/user-manager-service/internal/infrastructure/config"
 	"github.com/ipede/user-manager-service/internal/infrastructure/database"
@@ -51,9 +52,20 @@ func setupTestDB(t *testing.T) (*database.Postgres, func()) {
 		DBName:     "test",
 	}
 
-	// Setup database and run migrations
-	db, err := database.NewPostgres(ctx, cfg, zap.NewNop())
-	require.NoError(t, err)
+	// Setup database and run migrations with retry
+	var db *database.Postgres
+	maxRetries := 5
+	for i := 0; i < maxRetries; i++ {
+		db, err = database.NewPostgres(ctx, cfg, zap.NewNop())
+		if err == nil {
+			break
+		}
+		if i < maxRetries-1 {
+			time.Sleep(time.Second)
+			continue
+		}
+		require.NoError(t, err)
+	}
 
 	// Create tables
 	err = db.Exec(ctx, `
@@ -80,8 +92,12 @@ func setupTestDB(t *testing.T) (*database.Postgres, func()) {
 	require.NoError(t, err)
 
 	cleanup := func() {
-		db.Close()
-		container.Terminate(ctx)
+		if db != nil {
+			db.Close()
+		}
+		if container != nil {
+			container.Terminate(ctx)
+		}
 	}
 
 	return db, cleanup

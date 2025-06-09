@@ -97,6 +97,7 @@ func TestTOTPService_EnableTOTP(t *testing.T) {
 				mockGenerator.On("GenerateBackupCodes", 10).Return([]string{"code1", "code2"}, nil)
 				mockRepo.On("SaveTOTPSecret", mock.Anything, "user1", "secret").Return(nil)
 				mockRepo.On("SaveBackupCodes", mock.Anything, "user1", []string{"code1", "code2"}).Return(nil)
+				mockGenerator.On("GenerateQRCode", mock.AnythingOfType("*domain.TOTPConfig")).Return("secret", nil)
 			},
 			expectedError: nil,
 		},
@@ -127,20 +128,24 @@ func TestTOTPService_EnableTOTP(t *testing.T) {
 			tt.setupMocks()
 
 			// Execute
-			config, backupCodes, err := service.EnableTOTP(tt.userID)
+			totp, err := service.EnableTOTP(tt.userID)
 
 			// Assert
 			if tt.expectedError != nil {
 				assert.Error(t, err)
 				assert.Equal(t, tt.expectedError, err)
-				assert.Nil(t, config)
-				assert.Len(t, backupCodes, 0)
+				if totp != nil {
+					assert.Nil(t, totp.QRCode)
+					assert.Len(t, totp.BackupCodes, 0)
+				} else {
+					assert.Nil(t, totp)
+				}
 			} else {
 				assert.NoError(t, err)
-				assert.NotNil(t, config)
-				assert.NotNil(t, backupCodes)
-				assert.Equal(t, "secret", config.Secret)
-				assert.Len(t, backupCodes, 2)
+				assert.NotNil(t, totp.QRCode)
+				assert.NotNil(t, totp.BackupCodes)
+				assert.Equal(t, "secret", totp.QRCode)
+				assert.Len(t, totp.BackupCodes, 2)
 			}
 
 			// Verify mocks
