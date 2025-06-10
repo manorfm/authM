@@ -93,11 +93,7 @@ func (h *HandlerUser) ListUsersHandler(w http.ResponseWriter, r *http.Request) {
 	users, err := h.userService.ListUsers(r.Context(), limit, offset)
 	if err != nil {
 		h.logger.Error("failed to list users", zap.Error(err))
-		if err == domain.ErrDatabaseQuery {
-			errors.RespondWithError(w, domain.ErrDatabaseQuery)
-			return
-		}
-		errors.RespondWithError(w, domain.ErrInternal)
+		errors.RespondWithError(w, err.(domain.Error))
 		return
 	}
 
