@@ -7,7 +7,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/ipede/user-manager-service/internal/domain"
-	"github.com/ipede/user-manager-service/internal/interfaces/http/dto"
 	"github.com/ipede/user-manager-service/internal/interfaces/http/errors"
 	"github.com/oklog/ulid/v2"
 	"go.uber.org/zap"
@@ -22,6 +21,22 @@ func NewUserHandler(userService domain.UserService, logger *zap.Logger) *Handler
 	return &HandlerUser{
 		userService: userService,
 		logger:      logger,
+	}
+}
+
+type UserResponse struct {
+	ID    string `json:"id"`
+	Email string `json:"email"`
+	Name  string `json:"name"`
+	Phone string `json:"phone"`
+}
+
+func NewUserResponse(user *domain.User) *UserResponse {
+	return &UserResponse{
+		ID:    user.ID.String(),
+		Email: user.Email,
+		Name:  user.Name,
+		Phone: user.Phone,
 	}
 }
 
@@ -45,7 +60,7 @@ func (h *HandlerUser) GetUserHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(dto.NewUserResponse(user)); err != nil {
+	if err := json.NewEncoder(w).Encode(NewUserResponse(user)); err != nil {
 		h.logger.Error("failed to encode response", zap.Error(err))
 		errors.RespondWithError(w, domain.ErrInternal)
 		return
@@ -86,9 +101,9 @@ func (h *HandlerUser) ListUsersHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response := make([]*dto.UserResponse, len(users))
+	response := make([]*UserResponse, len(users))
 	for i, user := range users {
-		response[i] = dto.NewUserResponse(user)
+		response[i] = NewUserResponse(user)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

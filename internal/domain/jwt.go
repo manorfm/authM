@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/ipede/user-manager-service/internal/infrastructure/config"
+	"github.com/oklog/ulid/v2"
 )
 
 // JWT defines the interface for JWT operations
@@ -167,4 +169,34 @@ func generateKeyID(key *rsa.PrivateKey) string {
 
 	// Encode as base64url without padding
 	return base64.RawURLEncoding.EncodeToString(hash[:])
+}
+
+// This allows for easier mocking in tests
+// Only the methods needed by the middleware are included
+// JWTService defines the interface for JWT operations
+type JWTService interface {
+	ValidateToken(token string) (*Claims, error)
+	GetJWKS(ctx context.Context) (map[string]interface{}, error)
+	GenerateTokenPair(userID ulid.ULID, roles []string) (*TokenPair, error)
+	GetPublicKey() *rsa.PublicKey
+	RotateKeys() error
+	BlacklistToken(tokenID string, expiresAt time.Time) error
+	IsTokenBlacklisted(tokenID string) bool
+	TryVault() error
+}
+
+// JWTStrategy defines the interface for JWT operations
+type JWTStrategy interface {
+	// Sign signs a JWT token with the strategy's private key
+	Sign(claims *Claims) (string, error)
+	// Verify verifies a JWT token
+	Verify(tokenString string) (*Claims, error)
+	// GetPublicKey returns the public key for token validation
+	GetPublicKey() *rsa.PublicKey
+	// GetKeyID returns the current key ID
+	GetKeyID() string
+	// RotateKey rotates the key pair
+	RotateKey() error
+	// GetLastRotation returns the last key rotation time
+	GetLastRotation() time.Time
 }

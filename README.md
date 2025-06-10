@@ -27,6 +27,9 @@ A RESTful service for user management with authentication, authorization, and OA
 - Header-based API versioning
 - Comprehensive error handling
 - Configurable JWT strategies
+- Multi-factor authentication (MFA) with TOTP
+- Backup codes for MFA recovery
+- MFA ticket-based verification flow
 
 ## Architecture
 
@@ -130,6 +133,13 @@ SMTP_FROM=noreply@example.com
 SMTP_AUTH_VALIDATION=true
 SMTP_USE_TLS=true
 SMTP_SKIP_VERIFY=false
+
+# TOTP Configuration
+TOTP_ISSUER=User Manager Service
+TOTP_ALGORITHM=SHA1
+TOTP_DIGITS=6
+TOTP_PERIOD=30
+TOTP_BACKUP_CODES_COUNT=10
 ```
 
 ### Running the Application
@@ -209,6 +219,7 @@ The service implements OAuth2 and OpenID Connect protocols with the following en
 - `POST /api/auth/verify-email` - Verify email address
 - `POST /api/auth/request-password-reset` - Request password reset
 - `POST /api/auth/reset-password` - Reset password
+- `POST /api/auth/verify-mfa` - Verify MFA code
 - `POST /api/oauth2/token` - OAuth2 token endpoint
 - `GET /.well-known/openid-configuration` - OpenID Provider Configuration
 - `GET /.well-known/jwks.json` - JSON Web Key Set
@@ -219,6 +230,10 @@ The service implements OAuth2 and OpenID Connect protocols with the following en
 - `GET /api/oauth2/authorize` - OAuth2 authorization endpoint
 - `POST /api/oauth2/token` - OAuth2 token endpoint
 - `GET /api/oauth2/userinfo` - Get user information
+- `POST /api/totp/enable` - Enable TOTP for user
+- `POST /api/totp/verify` - Verify TOTP code
+- `POST /api/totp/verify-backup` - Verify TOTP backup code
+- `POST /api/totp/disable` - Disable TOTP for user
 
 #### Admin Endpoints (Requires Admin Role)
 - `GET /api/users` - List all users
@@ -284,6 +299,19 @@ Common error codes:
 - `U0042` - Token signature invalid
 - `U0043` - Token malformed
 - `U0044` - Token has no roles
+- `U0045` - TOTP not enabled
+- `U0046` - TOTP already enabled
+- `U0047` - Invalid TOTP code
+- `U0048` - TOTP secret generation failed
+- `U0049` - TOTP QR generation failed
+- `U0050` - TOTP backup codes generation failed
+- `U0051` - Invalid TOTP backup code
+- `U0052` - TOTP backup codes exhausted
+- `U0053` - TOTP verification required
+- `U0054` - Invalid MFA ticket
+- `U0055` - MFA ticket expired
+- `U0056` - MFA ticket already used
+- `U0057` - Invalid user ID
 
 ## Project Structure
 
@@ -368,6 +396,11 @@ The service includes OpenTelemetry integration for:
 - Header-based API versioning
 - Comprehensive error handling
 - Configurable JWT strategies
+- Multi-factor authentication with TOTP
+- Backup codes for MFA recovery
+- MFA ticket-based verification flow
+- Secure TOTP secret storage
+- TOTP backup codes management
 
 ## License
 
