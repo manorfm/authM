@@ -40,14 +40,15 @@ func NewRouter(
 	oauthRepo := repository.NewOAuth2Repository(db, logger)
 	verificationRepo := repository.NewVerificationCodeRepository(db, logger)
 	totpRepo := repository.NewTOTPRepository(db, logger)
+	mfaTicketRepo := repository.NewMFATicketRepository(db, logger)
 
 	totpGenerator := totp.NewGenerator(logger)
 	emailTemplate := email.NewEmailTemplate(&cfg.SMTP, logger)
 
 	totpService := application.NewTOTPService(totpRepo, totpGenerator, logger)
 	userService := application.NewUserService(userRepo, logger)
-	authService := application.NewAuthService(userRepo, verificationRepo, jwtService, emailTemplate, logger)
 	oauth2Service := application.NewOAuth2Service(oauthRepo, logger)
+	authService := application.NewAuthService(userRepo, verificationRepo, jwtService, emailTemplate, totpService, mfaTicketRepo, logger)
 	oidcService := application.NewOIDCService(oauth2Service, jwtService, userRepo, totpService, cfg, logger)
 
 	// Initialize handlers
@@ -114,6 +115,7 @@ func NewRouter(
 		r.Group(func(r chi.Router) {
 			r.Post("/register", authHandler.RegisterHandler)
 			r.Post("/auth/login", authHandler.LoginHandler)
+			r.Post("/auth/verify-mfa", authHandler.VerifyMFAHandler)
 			r.Post("/auth/verify-email", authHandler.VerifyEmailHandler)
 			r.Post("/auth/request-password-reset", authHandler.RequestPasswordResetHandler)
 			r.Post("/auth/reset-password", authHandler.ResetPasswordHandler)
@@ -135,7 +137,7 @@ func NewRouter(
 		// Protected routes
 		r.Group(func(r chi.Router) {
 			r.Use(authMiddleware.Authenticator)
-			r.Use(totpMiddleware.Verifier)
+			//r.Use(totpMiddleware.Verifier)
 
 			// TOTP verification endpoint
 			r.Post("/totp/verify", totpMiddleware.VerificationHandler)

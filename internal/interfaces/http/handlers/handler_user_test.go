@@ -95,7 +95,7 @@ func TestUserHandler_GetUser(t *testing.T) {
 			},
 			expectedStatus: http.StatusBadRequest,
 			expectedBody: map[string]interface{}{
-				"code":    "U0054",
+				"code":    "U0057",
 				"message": "Invalid user ID",
 			},
 		},
@@ -182,7 +182,7 @@ func TestUserHandler_UpdateUser(t *testing.T) {
 			},
 			expectedStatus: http.StatusBadRequest,
 			expectedBody: map[string]interface{}{
-				"code":    "U0054",
+				"code":    "U0057",
 				"message": "Invalid user ID",
 			},
 		},

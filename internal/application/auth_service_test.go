@@ -182,6 +182,60 @@ func (m *mockVerificationCodeRepository) DeleteByUserIDAndType(ctx context.Conte
 	return args.Error(0)
 }
 
+type authMockTOTPService struct {
+	mock.Mock
+}
+
+func (m *authMockTOTPService) EnableTOTP(userID string) (*domain.TOTP, error) {
+	args := m.Called(userID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*domain.TOTP), args.Error(1)
+}
+
+func (m *authMockTOTPService) VerifyTOTP(userID, code string) error {
+	args := m.Called(userID, code)
+	return args.Error(0)
+}
+
+func (m *authMockTOTPService) VerifyBackupCode(userID, code string) error {
+	args := m.Called(userID, code)
+	return args.Error(0)
+}
+
+func (m *authMockTOTPService) DisableTOTP(userID string) error {
+	args := m.Called(userID)
+	return args.Error(0)
+}
+
+func (m *authMockTOTPService) GetTOTPSecret(ctx context.Context, userID string) (string, error) {
+	args := m.Called(ctx, userID)
+	return args.String(0), args.Error(1)
+}
+
+type mockMFATicketRepository struct {
+	mock.Mock
+}
+
+func (m *mockMFATicketRepository) Create(ctx context.Context, ticket *domain.MFATicket) error {
+	args := m.Called(ctx, ticket)
+	return args.Error(0)
+}
+
+func (m *mockMFATicketRepository) Get(ctx context.Context, id string) (*domain.MFATicket, error) {
+	args := m.Called(ctx, id)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*domain.MFATicket), args.Error(1)
+}
+
+func (m *mockMFATicketRepository) Delete(ctx context.Context, id string) error {
+	args := m.Called(ctx, id)
+	return args.Error(0)
+}
+
 func TestAuthService_Register(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -232,9 +286,19 @@ func TestAuthService_Register(t *testing.T) {
 			mockUserRepo := new(MockUserRepository)
 			mockVerificationRepo := new(mockVerificationCodeRepository)
 			mockEmailSvc := new(mockEmailService)
+			mockTOTPSvc := new(authMockTOTPService)
+			mockMFATicketRepo := new(mockMFATicketRepository)
 			tt.setupMocks(mockUserRepo, mockVerificationRepo, mockEmailSvc)
 
-			service := NewAuthService(mockUserRepo, mockVerificationRepo, nil, mockEmailSvc, zap.NewNop())
+			service := NewAuthService(
+				mockUserRepo,
+				mockVerificationRepo,
+				nil,
+				mockEmailSvc,
+				mockTOTPSvc,
+				mockMFATicketRepo,
+				zap.NewNop(),
+			)
 			_, err := service.Register(context.Background(), "Test User", tt.email, tt.password, "1234567890")
 
 			if tt.expectedError != nil {
@@ -329,9 +393,19 @@ func TestAuthService_VerifyEmail(t *testing.T) {
 			mockUserRepo := new(MockUserRepository)
 			mockVerificationRepo := new(mockVerificationCodeRepository)
 			mockEmailSvc := new(mockEmailService)
+			mockTOTPSvc := new(authMockTOTPService)
+			mockMFATicketRepo := new(mockMFATicketRepository)
 			tt.setupMocks(mockUserRepo, mockVerificationRepo, mockEmailSvc)
 
-			service := NewAuthService(mockUserRepo, mockVerificationRepo, nil, mockEmailSvc, zap.NewNop())
+			service := NewAuthService(
+				mockUserRepo,
+				mockVerificationRepo,
+				nil,
+				mockEmailSvc,
+				mockTOTPSvc,
+				mockMFATicketRepo,
+				zap.NewNop(),
+			)
 			err := service.VerifyEmail(context.Background(), tt.email, tt.code)
 
 			if tt.expectedError != nil {
@@ -412,9 +486,19 @@ func TestAuthService_RequestPasswordReset(t *testing.T) {
 			mockUserRepo := new(MockUserRepository)
 			mockVerificationRepo := new(mockVerificationCodeRepository)
 			mockEmailSvc := new(mockEmailService)
+			mockTOTPSvc := new(authMockTOTPService)
+			mockMFATicketRepo := new(mockMFATicketRepository)
 			tt.setupMocks(mockUserRepo, mockVerificationRepo, mockEmailSvc)
 
-			service := NewAuthService(mockUserRepo, mockVerificationRepo, nil, mockEmailSvc, zap.NewNop())
+			service := NewAuthService(
+				mockUserRepo,
+				mockVerificationRepo,
+				nil,
+				mockEmailSvc,
+				mockTOTPSvc,
+				mockMFATicketRepo,
+				zap.NewNop(),
+			)
 			err := service.RequestPasswordReset(context.Background(), tt.email)
 
 			if tt.expectedError != nil {
@@ -537,7 +621,15 @@ func TestAuthService_ResetPassword(t *testing.T) {
 
 			tt.setupMocks(mockUserRepo, mockVerificationRepo)
 
-			service := NewAuthService(mockUserRepo, mockVerificationRepo, mockJWTService, mockEmailService, logger)
+			service := NewAuthService(
+				mockUserRepo,
+				mockVerificationRepo,
+				mockJWTService,
+				mockEmailService,
+				nil,
+				nil,
+				logger,
+			)
 
 			err := service.ResetPassword(context.Background(), tt.email, tt.code, tt.newPassword)
 
@@ -631,10 +723,22 @@ func TestAuthService_Login(t *testing.T) {
 			repo := new(MockUserRepository)
 			mockJWTService := new(mockJWTService)
 			mockEmailSvc := new(mockEmailService)
-			service := NewAuthService(repo, nil, mockJWTService, mockEmailSvc, zap.NewNop())
+			mockTOTPSvc := new(authMockTOTPService)
+			mockMFATicketRepo := new(mockMFATicketRepository)
+			service := NewAuthService(
+				repo,
+				nil,
+				mockJWTService,
+				mockEmailSvc,
+				mockTOTPSvc,
+				mockMFATicketRepo,
+				zap.NewNop(),
+			)
 
 			tt.mockSetup(repo)
 			if tt.expectedToken != nil {
+				mockTOTPSvc.On("GetTOTPSecret", mock.Anything, mock.Anything).Return("", domain.ErrTOTPNotEnabled)
+				mockMFATicketRepo.On("Create", mock.Anything, mock.Anything).Return(nil)
 				mockJWTService.On("GenerateTokenPair", mock.Anything, mock.Anything).Return(&domain.TokenPair{
 					AccessToken:  "access_token",
 					RefreshToken: "refresh_token",
@@ -649,8 +753,14 @@ func TestAuthService_Login(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 				assert.NotNil(t, token)
-				assert.NotEmpty(t, token.AccessToken)
-				assert.NotEmpty(t, token.RefreshToken)
+				if token != nil {
+					tokenPair, ok := token.(*domain.TokenPair)
+					assert.True(t, ok)
+					if ok && tokenPair != nil {
+						assert.NotEmpty(t, tokenPair.AccessToken)
+						assert.NotEmpty(t, tokenPair.RefreshToken)
+					}
+				}
 			}
 		})
 	}

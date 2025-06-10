@@ -52,23 +52,20 @@ func (s *OIDCService) GetUserInfo(ctx context.Context, userID string) (*domain.U
 		return nil, domain.ErrUserNotFound
 	}
 
+	amr := []string{"pwd"}
+	secret, err := s.totpService.GetTOTPSecret(context.Background(), user.ID.String())
+	if err == nil && secret != "" {
+		amr = append(amr, "totp")
+	}
+
 	// Return user info
 	return &domain.UserInfo{
 		Sub:           user.ID.String(),
 		Name:          user.Name,
 		Email:         user.Email,
 		EmailVerified: true,
-		AMR:           s.getAMR(user),
+		AMR:           amr,
 	}, nil
-}
-
-func (s *OIDCService) getAMR(user *domain.User) []string {
-	amr := []string{"pwd"}
-	secret, err := s.totpService.GetTOTPSecret(context.Background(), user.ID.String())
-	if err == nil && secret != "" {
-		amr = append(amr, "mfa")
-	}
-	return amr
 }
 
 func (s *OIDCService) GetOpenIDConfiguration(ctx context.Context) (map[string]interface{}, error) {

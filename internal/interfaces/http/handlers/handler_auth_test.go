@@ -28,12 +28,25 @@ func (m *mockAuthService) Register(ctx context.Context, name, email, password, p
 	return args.Get(0).(*domain.User), args.Error(1)
 }
 
-func (m *mockAuthService) Login(ctx context.Context, email, password string) (*domain.TokenPair, error) {
+func (m *mockAuthService) Login(ctx context.Context, email, password string) (interface{}, error) {
 	args := m.Called(ctx, email, password)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
+	return args.Get(0), args.Error(1)
+}
+
+func (m *mockAuthService) VerifyMFA(ctx context.Context, ticketID, code string) (*domain.TokenPair, error) {
+	args := m.Called(ctx, ticketID, code)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
 	return args.Get(0).(*domain.TokenPair), args.Error(1)
+}
+
+func (m *mockAuthService) VerifyEmail(ctx context.Context, email, code string) error {
+	args := m.Called(ctx, email, code)
+	return args.Error(0)
 }
 
 func (m *mockAuthService) RequestPasswordReset(ctx context.Context, email string) error {
@@ -43,11 +56,6 @@ func (m *mockAuthService) RequestPasswordReset(ctx context.Context, email string
 
 func (m *mockAuthService) ResetPassword(ctx context.Context, email, code, newPassword string) error {
 	args := m.Called(ctx, email, code, newPassword)
-	return args.Error(0)
-}
-
-func (m *mockAuthService) VerifyEmail(ctx context.Context, email, code string) error {
-	args := m.Called(ctx, email, code)
 	return args.Error(0)
 }
 

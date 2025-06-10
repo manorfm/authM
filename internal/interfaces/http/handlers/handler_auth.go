@@ -23,6 +23,26 @@ func NewAuthHandler(authService domain.AuthService, logger *zap.Logger) *Handler
 	}
 }
 
+type VerifyEmailRequest struct {
+	Email string `json:"email" validate:"required,email"`
+	Code  string `json:"code" validate:"required"`
+}
+
+type RequestPasswordResetRequest struct {
+	Email string `json:"email" validate:"required,email"`
+}
+
+type ResetPasswordRequest struct {
+	Email       string `json:"email" validate:"required,email"`
+	Code        string `json:"code" validate:"required"`
+	NewPassword string `json:"new_password" validate:"required,min=8"`
+}
+
+type MFARequest struct {
+	Ticket string `json:"ticket" validate:"required"`
+	Code   string `json:"code" validate:"required"`
+}
+
 func (h *HandlerAuth) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	var req domain.CreateUserRequest
 
@@ -66,7 +86,7 @@ func (h *HandlerAuth) LoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tokenPair, err := h.authService.Login(r.Context(), req.Email, req.Password)
+	result, err := h.authService.Login(r.Context(), req.Email, req.Password)
 	if err != nil {
 		h.logger.Debug("failed to login user", zap.Error(err))
 		errors.RespondWithError(w, err.(domain.Error))
@@ -74,7 +94,7 @@ func (h *HandlerAuth) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(tokenPair); err != nil {
+	if err := json.NewEncoder(w).Encode(result); err != nil {
 		h.logger.Error("failed to encode response", zap.Error(err))
 		errors.RespondWithError(w, domain.ErrInternal)
 		return
@@ -116,21 +136,6 @@ func pascalToCamel(str string) string {
 	}
 	// Converte a primeira letra para minúscula
 	return strings.ToLower(string(str[0])) + str[1:]
-}
-
-type VerifyEmailRequest struct {
-	Email string `json:"email" validate:"required,email"`
-	Code  string `json:"code" validate:"required"`
-}
-
-type RequestPasswordResetRequest struct {
-	Email string `json:"email" validate:"required,email"`
-}
-
-type ResetPasswordRequest struct {
-	Email       string `json:"email" validate:"required,email"`
-	Code        string `json:"code" validate:"required"`
-	NewPassword string `json:"new_password" validate:"required,min=8"`
 }
 
 func (h *HandlerAuth) VerifyEmailHandler(w http.ResponseWriter, r *http.Request) {
@@ -203,4 +208,35 @@ func (h *HandlerAuth) ResetPasswordHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+func (h *HandlerAuth) VerifyMFAHandler(w http.ResponseWriter, r *http.Request) {
+	var req MFARequest
+	defer r.Body.Close()
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		errors.RespondWithError(w, domain.ErrInvalidRequestBody)
+		return
+	}
+
+	var validate = validator.New()
+	if err := validate.Struct(req); err != nil {
+		h.logger.Debug("validation error", zap.Error(err))
+		createErrorMessage(w, err)
+		return
+	}
+
+	tokenPair, err := h.authService.VerifyMFA(r.Context(), req.Ticket, req.Code)
+	if err != nil {
+		h.logger.Debug("failed to verify MFA", zap.Error(err))
+		errors.RespondWithError(w, err.(domain.Error))
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(tokenPair); err != nil {
+		h.logger.Error("failed to encode response", zap.Error(err))
+		errors.RespondWithError(w, domain.ErrInternal)
+		return
+	}
 }

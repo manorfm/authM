@@ -174,9 +174,12 @@ var (
 	ErrInvalidTOTPBackupCode     = NewBusinessError("U0051", "Invalid TOTP backup code")
 	ErrTOTPBackupCodesExhausted  = NewBusinessError("U0052", "All TOTP backup codes have been used")
 	ErrTOTPVerificationRequired  = NewBusinessError("U0053", "TOTP verification required")
+	ErrInvalidMFATicket          = NewBusinessError("U0054", "Invalid MFA ticket")
+	ErrMFATicketExpired          = NewBusinessError("U0055", "MFA ticket expired")
+	ErrMFATicketAlreadyUsed      = NewBusinessError("U0056", "MFA ticket already used")
 
 	// ErrInvalidUserID is returned when the user ID is invalid
-	ErrInvalidUserID = NewBusinessError("U0054", "Invalid user ID")
+	ErrInvalidUserID = NewBusinessError("U0057", "Invalid user ID")
 )
 
 func (e *BusinessError) GetCode() string {

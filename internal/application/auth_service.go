@@ -15,6 +15,8 @@ type AuthService struct {
 	verificationRepo domain.VerificationCodeRepository
 	jwtService       domain.JWTService
 	emailService     domain.EmailService
+	totpService      domain.TOTPService
+	mfaTicketRepo    domain.MFATicketRepository
 	logger           *zap.Logger
 }
 
@@ -23,6 +25,8 @@ func NewAuthService(
 	verificationRepo domain.VerificationCodeRepository,
 	jwtService domain.JWTService,
 	emailService domain.EmailService,
+	totpService domain.TOTPService,
+	mfaTicketRepo domain.MFATicketRepository,
 	logger *zap.Logger,
 ) *AuthService {
 	return &AuthService{
@@ -30,6 +34,8 @@ func NewAuthService(
 		verificationRepo: verificationRepo,
 		jwtService:       jwtService,
 		emailService:     emailService,
+		totpService:      totpService,
+		mfaTicketRepo:    mfaTicketRepo,
 		logger:           logger,
 	}
 }
@@ -87,7 +93,7 @@ func (s *AuthService) Register(ctx context.Context, name, email, password, phone
 	return user, nil
 }
 
-func (s *AuthService) Login(ctx context.Context, email, password string) (*domain.TokenPair, error) {
+func (s *AuthService) Login(ctx context.Context, email, password string) (interface{}, error) {
 	user, err := s.userRepo.FindByEmail(ctx, email)
 	if err != nil {
 		return nil, domain.ErrInvalidCredentials
@@ -101,7 +107,41 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (*domai
 		return nil, domain.ErrInvalidCredentials
 	}
 
-	return s.jwtService.GenerateTokenPair(user.ID, user.Roles)
+	// Check if TOTP is enabled for the user
+	secret, err := s.totpService.GetTOTPSecret(ctx, user.ID.String())
+	if err != nil {
+		// If TOTP is not enabled, proceed with normal login
+		if err == domain.ErrTOTPNotEnabled || secret == "" {
+			tokenPair, err := s.jwtService.GenerateTokenPair(user.ID, user.Roles)
+			if err != nil {
+				return nil, err
+			}
+			return tokenPair, nil
+		}
+
+		s.logger.Error("Failed to check TOTP status",
+			zap.String("user_id", user.ID.String()),
+			zap.Error(err))
+		return nil, domain.ErrInternal
+	}
+
+	// Generate MFA ticket
+	ticketID := ulid.Make()
+	ticket := &domain.MFATicket{
+		Ticket:    ticketID,
+		User:      user.ID.String(),
+		CreatedAt: time.Now(),
+		ExpiresAt: time.Now().Add(5 * time.Minute),
+	}
+
+	if err := s.mfaTicketRepo.Create(ctx, ticket); err != nil {
+		s.logger.Error("Failed to create MFA ticket",
+			zap.String("user_id", user.ID.String()),
+			zap.Error(err))
+		return nil, domain.ErrInternal
+	}
+
+	return ticket, nil
 }
 
 func (s *AuthService) VerifyEmail(ctx context.Context, email, code string) error {
@@ -237,11 +277,58 @@ func (s *AuthService) ResetPassword(ctx context.Context, email, code, newPasswor
 	return s.userRepo.UpdatePassword(ctx, user.ID, string(hashedPassword))
 }
 
+func (s *AuthService) VerifyMFA(ctx context.Context, ticketID, code string) (*domain.TokenPair, error) {
+	// Get and validate ticket
+	ticket, err := s.mfaTicketRepo.Get(ctx, ticketID)
+	if err != nil {
+		return nil, err
+	}
+
+	if time.Now().After(ticket.ExpiresAt) {
+		s.logger.Error("MFA ticket expired", zap.String("ticket_id", ticketID))
+		s.mfaTicketRepo.Delete(ctx, ticketID)
+		return nil, domain.ErrMFATicketExpired
+	}
+
+	// Get user
+	userID, err := ulid.Parse(ticket.User)
+	if err != nil {
+		s.logger.Error("Invalid user ID", zap.String("ticket_id", ticketID), zap.Error(err))
+		return nil, domain.ErrInvalidUserID
+	}
+
+	user, err := s.userRepo.FindByID(ctx, userID)
+	if err != nil {
+		s.logger.Error("User not found", zap.String("ticket_id", ticketID), zap.Error(err))
+		return nil, domain.ErrUserNotFound
+	}
+
+	// Verify TOTP code
+	err = s.totpService.VerifyTOTP(user.ID.String(), code)
+	if err != nil {
+		s.logger.Error("Invalid TOTP code", zap.String("ticket_id", ticketID), zap.Error(err))
+		return nil, err
+	}
+
+	// Delete ticket
+	if err := s.mfaTicketRepo.Delete(ctx, ticketID); err != nil {
+		s.logger.Error("Failed to delete MFA ticket",
+			zap.String("ticket_id", ticketID),
+			zap.Error(err))
+		return nil, domain.ErrInternal
+	}
+
+	// Generate token pair with MFA AMR
+	tokenPair, err := s.jwtService.GenerateTokenPair(user.ID, user.Roles)
+	if err != nil {
+		return nil, err
+	}
+
+	return tokenPair, nil
+}
+
 func generateRandomCode() string {
 	// Generate a ULID which provides good entropy and is time-ordered
 	id := ulid.Make()
-
-	// Convert to base32 (ULID is already base32 encoded)
-	// Take the first 'length' characters
 	return id.String()
 }
