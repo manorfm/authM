@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"context"
 	"net/http"
 	"strings"
 
@@ -38,8 +37,8 @@ func (m *AuthMiddleware) Authenticator(next http.Handler) http.Handler {
 			zap.String("subject", claims.Subject),
 			zap.Strings("roles", claims.Roles))
 
-		ctx := context.WithValue(r.Context(), "sub", claims.Subject)
-		ctx = context.WithValue(ctx, "roles", claims.Roles)
+		ctx := domain.WithSubject(r.Context(), claims.Subject)
+		ctx = domain.WithRoles(ctx, claims.Roles)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -47,7 +46,7 @@ func (m *AuthMiddleware) Authenticator(next http.Handler) http.Handler {
 func (m *AuthMiddleware) RequireRole(role string) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			roles, ok := r.Context().Value("roles").([]string)
+			roles, ok := domain.GetRoles(r.Context())
 			if !ok {
 				httperrors.RespondWithError(w, domain.ErrForbidden)
 				return

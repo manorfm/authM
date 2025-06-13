@@ -1,0 +1,34 @@
+linters:
+  enable:
+    - staticcheck
+    - gofmt
+    - govet
+    - errcheck
+    - ineffassign
+    - gosimple
+    - unused
+    - misspell
+    - gosec
+
+linters-settings:
+  staticcheck:
+    checks: ["all"]
+    initialisms: ["ACL", "API", "ASCII", "CPU", "CSS", "DNS", "EOF", "GUID", "HTML", "HTTP", "HTTPS", "ID", "IP", "JSON", "QPS", "RAM", "RPC", "SLA", "SMTP", "SQL", "SSH", "TCP", "TLS", "TTL", "UDP", "UI", "GID", "UID", "UUID", "URI", "URL", "UTF8", "VM", "XML", "XMPP", "XSRF", "XSS"]
+    go: "1.21"
+
+run:
+  deadline: 5m
+  skip-dirs:
+    - vendor
+    - test
+    - migrations
+  skip-files:
+    - ".*_test.go$"
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
+        - staticcheck
+        - gosec 

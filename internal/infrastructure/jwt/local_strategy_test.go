@@ -1,7 +1,6 @@
 package jwt
 
 import (
-	"crypto/rsa"
 	"os"
 	"path/filepath"
 	"testing"
@@ -15,29 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
-
-// mockVaultStrategy implements JWTStrategy for testing
-type mockVaultStrategy struct{}
-
-func (m *mockVaultStrategy) Sign(claims *domain.Claims) (string, error) {
-	return "", domain.ErrInvalidClient
-}
-
-func (m *mockVaultStrategy) GetPublicKey() *rsa.PublicKey {
-	return nil
-}
-
-func (m *mockVaultStrategy) GetKeyID() string {
-	return "mock-vault-key"
-}
-
-func (m *mockVaultStrategy) RotateKey() error {
-	return domain.ErrInvalidClient
-}
-
-func (m *mockVaultStrategy) GetLastRotation() time.Time {
-	return time.Now()
-}
 
 func TestLocalStrategy(t *testing.T) {
 	// Create temporary directory for test keys

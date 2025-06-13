@@ -47,56 +47,6 @@ func (m *mockOAuth2Service) ValidatePKCE(ctx context.Context, codeVerifier, code
 	return args.Error(0)
 }
 
-type mockOAuth2Repository struct {
-	mock.Mock
-}
-
-func (m *mockOAuth2Repository) CreateClient(ctx context.Context, client *domain.OAuth2Client) error {
-	args := m.Called(ctx, client)
-	return args.Error(0)
-}
-
-func (m *mockOAuth2Repository) FindClientByID(ctx context.Context, id string) (*domain.OAuth2Client, error) {
-	args := m.Called(ctx, id)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*domain.OAuth2Client), args.Error(1)
-}
-
-func (m *mockOAuth2Repository) UpdateClient(ctx context.Context, client *domain.OAuth2Client) error {
-	args := m.Called(ctx, client)
-	return args.Error(0)
-}
-
-func (m *mockOAuth2Repository) DeleteClient(ctx context.Context, id string) error {
-	args := m.Called(ctx, id)
-	return args.Error(0)
-}
-
-func (m *mockOAuth2Repository) ListClients(ctx context.Context) ([]*domain.OAuth2Client, error) {
-	args := m.Called(ctx)
-	return args.Get(0).([]*domain.OAuth2Client), args.Error(1)
-}
-
-func (m *mockOAuth2Repository) CreateAuthorizationCode(ctx context.Context, code *domain.AuthorizationCode) error {
-	args := m.Called(ctx, code)
-	return args.Error(0)
-}
-
-func (m *mockOAuth2Repository) DeleteAuthorizationCode(ctx context.Context, code string) error {
-	args := m.Called(ctx, code)
-	return args.Error(0)
-}
-
-func (m *mockOAuth2Repository) GetAuthorizationCode(ctx context.Context, code string) (*domain.AuthorizationCode, error) {
-	args := m.Called(ctx, code)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*domain.AuthorizationCode), args.Error(1)
-}
-
 type mockUserRepository struct {
 	mock.Mock
 }
@@ -164,11 +114,6 @@ func (m *mockUserRepository) UpdatePassword(ctx context.Context, userID ulid.ULI
 	args := m.Called(ctx, userID, hashedPassword)
 	return args.Error(0)
 }
-
-// Mock JWT para simular chave pública inválida
-type mockJWTWithNilKey struct{}
-
-func (m *mockJWTWithNilKey) GetPublicKey() *rsa.PublicKey { return nil }
 
 // Mock JWT para simular fluxo de refresh token
 type mockJWTRefresh struct{}

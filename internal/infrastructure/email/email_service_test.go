@@ -169,7 +169,7 @@ func TestEmailService_SendEmail(t *testing.T) {
 			// Create context with request ID for specific test
 			ctx := context.Background()
 			if tt.name == "email with request ID" {
-				ctx = context.WithValue(ctx, "request_id", "test-request-id")
+				ctx = domain.WithRequestID(ctx, "test-request-id")
 			}
 
 			// Send email

@@ -619,7 +619,7 @@ func TestHandleAuthorize(t *testing.T) {
 			req.URL.RawQuery = q.Encode()
 
 			// Add user ID to context
-			ctx := context.WithValue(req.Context(), "sub", "user123")
+			ctx := domain.WithSubject(req.Context(), "user123")
 			req = req.WithContext(ctx)
 
 			rr := httptest.NewRecorder()
@@ -915,7 +915,7 @@ func TestHandleUserInfo(t *testing.T) {
 
 			req := httptest.NewRequest("GET", "/userinfo", nil)
 			if tt.userID != "" {
-				ctx := context.WithValue(req.Context(), "sub", tt.userID)
+				ctx := domain.WithSubject(req.Context(), tt.userID)
 				req = req.WithContext(ctx)
 			}
 
@@ -1303,7 +1303,7 @@ func TestOIDCHandler_AuthorizeHandler(t *testing.T) {
 			req.URL.RawQuery = q.Encode()
 
 			// Add user ID to context
-			ctx := context.WithValue(req.Context(), "sub", "user123")
+			ctx := domain.WithSubject(req.Context(), "user123")
 			req = req.WithContext(ctx)
 
 			rr := httptest.NewRecorder()

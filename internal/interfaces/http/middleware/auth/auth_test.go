@@ -187,7 +187,7 @@ func TestAuthMiddleware_RequireRole(t *testing.T) {
 			})
 
 			req := httptest.NewRequest("GET", "/", nil)
-			ctx := context.WithValue(req.Context(), "roles", tt.userRoles)
+			ctx := domain.WithRoles(req.Context(), tt.userRoles)
 			req = req.WithContext(ctx)
 
 			w := httptest.NewRecorder()

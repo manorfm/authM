@@ -206,37 +206,3 @@ func TestVaultStrategy(t *testing.T) {
 		assert.Empty(t, token)
 	})
 }
-
-func getVaultStrategy(t *testing.T) *vaultStrategy {
-	logger, err := zap.NewDevelopment()
-	require.NoError(t, err)
-
-	config := &config.Config{
-		VaultAddress:   vaultAddr,
-		VaultToken:     vaultToken,
-		VaultMountPath: "transit",
-		VaultKeyName:   "test-key",
-	}
-
-	strategy, err := NewVaultStrategy(config, logger)
-	require.NoError(t, err)
-	require.NotNil(t, strategy)
-
-	return strategy.(*vaultStrategy)
-}
-
-// mockLogicalBackend implementa a interface LogicalBackend para testes
-type mockLogicalBackend struct {
-	readResponse  *api.Secret
-	writeResponse *api.Secret
-	readErr       error
-	writeErr      error
-}
-
-func (m *mockLogicalBackend) Read(path string) (*api.Secret, error) {
-	return m.readResponse, m.readErr
-}
-
-func (m *mockLogicalBackend) Write(path string, data map[string]interface{}) (*api.Secret, error) {
-	return m.writeResponse, m.writeErr
-}

@@ -8,6 +8,11 @@ MIGRATION_UP_DIR=migrations/up
 MIGRATION_DOWN_DIR=migrations/down
 MIGRATE_CMD=go run cmd/migrate/main.go
 
+coverage:
+	go test -coverprofile=coverage.out ./...
+	go tool cover -html=coverage.out -o coverage.html
+
+	
 # Install dependencies
 deps:
 	go mod tidy

@@ -1,7 +1,6 @@
 package totp
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 
@@ -28,7 +27,7 @@ func NewMiddleware(totpService domain.TOTPService, logger *zap.Logger) *Middlewa
 func (m *Middleware) Verifier(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Get user ID from context (set by auth middleware)
-		userID, ok := r.Context().Value("sub").(string)
+		userID, ok := domain.GetSubject(r.Context())
 		if !ok || userID == "" {
 			m.logger.Error("User not authenticated")
 			errors.RespondWithError(w, domain.ErrUnauthorized)
@@ -58,7 +57,7 @@ func (m *Middleware) Verifier(next http.Handler) http.Handler {
 		}
 
 		// TOTP is enabled, check if already verified in this session
-		if _, ok := r.Context().Value("totp_verified").(bool); ok {
+		if verified, ok := domain.GetTOTPVerified(r.Context()); ok && verified {
 			// TOTP already verified in this session, proceed
 			next.ServeHTTP(w, r)
 			return
@@ -78,7 +77,7 @@ func (m *Middleware) Verifier(next http.Handler) http.Handler {
 
 // VerificationHandler handles the TOTP verification process
 func (m *Middleware) VerificationHandler(w http.ResponseWriter, r *http.Request) {
-	userID, ok := r.Context().Value("sub").(string)
+	userID, ok := domain.GetSubject(r.Context())
 	if !ok || userID == "" {
 		m.logger.Error("User not authenticated")
 		errors.RespondWithError(w, domain.ErrUnauthorized)
@@ -124,7 +123,7 @@ func (m *Middleware) VerificationHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Create new context with TOTP verification flag
-	ctx := context.WithValue(r.Context(), "totp_verified", true)
+	ctx := domain.WithTOTPVerified(r.Context(), true)
 	*r = *r.WithContext(ctx)
 
 	w.Header().Set("Content-Type", "application/json")
