@@ -6,8 +6,8 @@ import (
 	"net/url"
 
 	"github.com/go-playground/validator/v10"
-	"github.com/ipede/user-manager-service/internal/domain"
-	"github.com/ipede/user-manager-service/internal/interfaces/http/errors"
+	"github.com/manorfm/authM/internal/domain"
+	"github.com/manorfm/authM/internal/interfaces/http/errors"
 	"go.uber.org/zap"
 )
 

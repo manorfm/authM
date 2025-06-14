@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/ipede/user-manager-service/internal/domain"
+	"github.com/manorfm/authM/internal/domain"
 	"github.com/stretchr/testify/assert"
 )
 

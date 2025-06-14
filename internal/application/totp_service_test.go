@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ipede/user-manager-service/internal/domain"
+	"github.com/manorfm/authM/internal/domain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"

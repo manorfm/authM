@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/ipede/user-manager-service/internal/domain"
+	"github.com/manorfm/authM/internal/domain"
 )
 
 // ErrorResponse represents the standard error response structure

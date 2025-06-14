@@ -1,11 +1,11 @@
-# User Manager Service
+# AuthM
 
 [![Go Version](https://img.shields.io/badge/Go-1.23-blue.svg)](https://golang.org)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-0.1.0-blue.svg)](https://github.com/ipede/user-manager-service/releases)
-[![Build Status](https://img.shields.io/badge/Build-Passing-brightgreen.svg)](https://github.com/ipede/user-manager-service/actions)
-[![Coverage](https://img.shields.io/badge/Coverage-80%25-brightgreen.svg)](https://github.com/ipede/user-manager-service/actions)
-[![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://hub.docker.com/r/ipede/user-manager-service)
+[![Version](https://img.shields.io/badge/Version-0.1.0-blue.svg)](https://github.com/manorfm/authM/releases)
+[![Build Status](https://img.shields.io/badge/Build-Passing-brightgreen.svg)](https://github.com/manorfm/authM/actions)
+[![Coverage](https://img.shields.io/badge/Coverage-80%25-brightgreen.svg)](https://github.com/manorfm/authM/actions)
+[![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://hub.docker.com/r/manorfm/authM)
 
 A RESTful service for user management with authentication, authorization, and OAuth2/OpenID Connect support.
 
@@ -45,7 +45,7 @@ The project follows a hexagonal architecture with the following layers:
 The service uses header-based versioning through the `Accept` header:
 
 ```http
-Accept: application/vnd.ipede.v1+json
+Accept: application/vnd.manorfm.v1+json
 ```
 
 This approach:
@@ -121,7 +121,7 @@ SERVER_URL=http://localhost:8080
 ENABLE_VAULT=true
 VAULT_ADDRESS=http://localhost:8200
 VAULT_TOKEN=your-token
-VAULT_MOUNT_PATH=transit/user-manager-service
+VAULT_MOUNT_PATH=transit/authM
 VAULT_KEY_NAME=jwt-signing-key
 
 # SMTP Configuration
@@ -135,7 +135,7 @@ SMTP_USE_TLS=true
 SMTP_SKIP_VERIFY=false
 
 # TOTP Configuration
-TOTP_ISSUER=User Manager Service
+TOTP_ISSUER=AuthM
 TOTP_ALGORITHM=SHA1
 TOTP_DIGITS=6
 TOTP_PERIOD=30
@@ -168,10 +168,10 @@ make swagger
 
 ```bash
 # Build Docker image
-docker build -t user-manager-service .
+docker build -t authM .
 
 # Run with Docker
-docker run -p 8080:8080 --env-file .env user-manager-service
+docker run -p 8080:8080 --env-file .env authM
 ```
 
 ## API Documentation
@@ -279,129 +279,4 @@ Common error codes:
 - `U0022` - Token not yet valid
 - `U0023` - Token has no roles
 - `U0024` - Token subject required
-- `U0025` - Invalid claims
-- `U0026` - Token blacklisted
-- `U0027` - Token generation failed
-- `U0028` - Invalid key configuration
-- `U0029` - Invalid signing method
-- `U0030` - Invalid signature
-- `U0031` - Invalid redirect URI
-- `U0032` - Invalid code challenge method
-- `U0033` - Invalid code challenge
-- `U0034` - Email not verified
-- `U0035` - Invalid verification code
-- `U0036` - Verification code expired
-- `U0037` - Invalid password change code
-- `U0038` - Password change code expired
-- `U0039` - Email send failed
-- `U0040` - Missing SMTP configuration
-- `U0041` - Invalid email
-- `U0042` - Token signature invalid
-- `U0043` - Token malformed
-- `U0044` - Token has no roles
-- `U0045` - TOTP not enabled
-- `U0046` - TOTP already enabled
-- `U0047` - Invalid TOTP code
-- `U0048` - TOTP secret generation failed
-- `U0049` - TOTP QR generation failed
-- `U0050` - TOTP backup codes generation failed
-- `U0051` - Invalid TOTP backup code
-- `U0052` - TOTP backup codes exhausted
-- `U0053` - TOTP verification required
-- `U0054` - Invalid MFA ticket
-- `U0055` - MFA ticket expired
-- `U0056` - MFA ticket already used
-- `U0057` - Invalid user ID
-
-## Project Structure
-
-```
-.
-├── cmd/                    # Application entry points
-│   ├── main.go            # Main application
-│   └── migrate/           # Migration tool
-├── internal/              # Private application code
-│   ├── domain/           # Domain entities and interfaces
-│   ├── application/      # Use cases and business logic
-│   ├── infrastructure/   # External services implementation
-│   │   ├── jwt/         # JWT service implementation
-│   │   ├── postgres/    # PostgreSQL implementation
-│   │   ├── email/       # Email service implementation
-│   │   └── vault/       # Vault integration
-│   └── interfaces/       # HTTP handlers and middlewares
-├── migrations/           # Database migrations
-├── docs/                # Documentation and Swagger files
-└── bin/                 # Compiled binaries
-```
-
-## Development
-
-### Database Migrations
-
-```bash
-# Run all pending migrations
-make migrate-up
-
-# Rollback the last migration
-make migrate-down
-
-# Reset migrations (rollback all and run up)
-make migrate-reset
-
-# Force migration to specific version
-make migrate-force VERSION=<version>
-```
-
-### Testing
-
-```bash
-# Run all tests
-make test
-
-# Run tests with coverage
-go test -cover ./...
-
-# Run specific test
-go test -run TestName ./...
-```
-
-### Code Quality
-
-```bash
-# Run linter
-make lint
-
-# Run all checks (lint + test)
-make check
-```
-
-## Observability
-
-The service includes OpenTelemetry integration for:
-
-- Distributed tracing
-- Metrics collection
-- Structured logging
-- Performance monitoring
-
-## Security Features
-
-- JWT key rotation with Vault integration
-- Rate limiting
-- Input validation
-- Secure password hashing
-- Email verification
-- Token blacklisting
-- Role-based access control
-- Header-based API versioning
-- Comprehensive error handling
-- Configurable JWT strategies
-- Multi-factor authentication with TOTP
-- Backup codes for MFA recovery
-- MFA ticket-based verification flow
-- Secure TOTP secret storage
-- TOTP backup codes management
-
-## License
-
-MIT 
+- `U0025`

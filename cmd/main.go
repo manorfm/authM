@@ -9,9 +9,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ipede/user-manager-service/internal/infrastructure/config"
-	"github.com/ipede/user-manager-service/internal/infrastructure/database"
-	httprouter "github.com/ipede/user-manager-service/internal/interfaces/http"
+	"github.com/manorfm/authM/internal/infrastructure/config"
+	"github.com/manorfm/authM/internal/infrastructure/database"
+	httprouter "github.com/manorfm/authM/internal/interfaces/http"
 	"go.uber.org/zap"
 )
 

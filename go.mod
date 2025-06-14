@@ -1,4 +1,4 @@
-module github.com/ipede/user-manager-service
+module github.com/manorfm/authM
 
 go 1.24
 

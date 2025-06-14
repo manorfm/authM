@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/ipede/user-manager-service/internal/infrastructure/config"
+	"github.com/manorfm/authM/internal/infrastructure/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"

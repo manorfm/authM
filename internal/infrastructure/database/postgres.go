@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ipede/user-manager-service/internal/infrastructure/config"
+	"github.com/manorfm/authM/internal/infrastructure/config"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"

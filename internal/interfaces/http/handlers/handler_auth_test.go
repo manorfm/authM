@@ -8,8 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/ipede/user-manager-service/internal/domain"
-	"github.com/ipede/user-manager-service/internal/interfaces/http/errors"
+	"github.com/manorfm/authM/internal/domain"
+	"github.com/manorfm/authM/internal/interfaces/http/errors"
 	"github.com/oklog/ulid/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"

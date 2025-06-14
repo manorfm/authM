@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ipede/user-manager-service/internal/domain"
-	"github.com/ipede/user-manager-service/internal/infrastructure/database"
-	"github.com/ipede/user-manager-service/internal/infrastructure/repository"
+	"github.com/manorfm/authM/internal/domain"
+	"github.com/manorfm/authM/internal/infrastructure/database"
+	"github.com/manorfm/authM/internal/infrastructure/repository"
 	"github.com/lib/pq"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

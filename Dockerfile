@@ -17,7 +17,7 @@ RUN go mod download
 COPY . .
 
 # Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o user-manager-service ./cmd/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o authM ./cmd/main.go
 
 # Final stage
 FROM alpine:3.19
@@ -32,7 +32,7 @@ RUN adduser -D -g '' appuser
 WORKDIR /app
 
 # Copy binary from builder
-COPY --from=builder /app/user-manager-service .
+COPY --from=builder /app/authM .
 
 # Set ownership
 RUN chown -R appuser:appuser /app
@@ -51,4 +51,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8080/health/ready || exit 1
 
 # Run the application
-CMD ["./user-manager-service"] 
+CMD ["./authM"] 

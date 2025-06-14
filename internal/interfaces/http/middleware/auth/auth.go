@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/ipede/user-manager-service/internal/domain"
-	httperrors "github.com/ipede/user-manager-service/internal/interfaces/http/errors"
+	"github.com/manorfm/authM/internal/domain"
+	httperrors "github.com/manorfm/authM/internal/interfaces/http/errors"
 	"go.uber.org/zap"
 )
 

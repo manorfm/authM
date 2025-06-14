@@ -13,8 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
-	"github.com/ipede/user-manager-service/internal/domain"
-	"github.com/ipede/user-manager-service/internal/infrastructure/config"
+	"github.com/manorfm/authM/internal/domain"
+	"github.com/manorfm/authM/internal/infrastructure/config"
 )
 
 func getJWTServiceWithDuration(t *testing.T, accessDuration, refreshDuration time.Duration) domain.JWTService {

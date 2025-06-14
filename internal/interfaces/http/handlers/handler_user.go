@@ -6,8 +6,8 @@ import (
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/ipede/user-manager-service/internal/domain"
-	"github.com/ipede/user-manager-service/internal/interfaces/http/errors"
+	"github.com/manorfm/authM/internal/domain"
+	"github.com/manorfm/authM/internal/interfaces/http/errors"
 	"github.com/oklog/ulid/v2"
 	"go.uber.org/zap"
 )

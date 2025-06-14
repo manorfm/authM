@@ -1,7 +1,7 @@
 .PHONY: deps test build run clean lint swagger migrate migrate-up migrate-down migrate-force migrate-reset
 
 # Variables
-BINARY_NAME=user-manager-service
+BINARY_NAME=authM
 BIN_DIR=bin
 BINARY_PATH=$(BIN_DIR)/$(BINARY_NAME)
 MIGRATION_UP_DIR=migrations/up

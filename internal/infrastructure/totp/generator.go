@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ipede/user-manager-service/internal/domain"
+	"github.com/manorfm/authM/internal/domain"
 	"github.com/pquerna/otp"
 	"github.com/pquerna/otp/totp"
 	"go.uber.org/zap"

@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ipede/user-manager-service/internal/domain"
-	"github.com/ipede/user-manager-service/internal/infrastructure/config"
+	"github.com/manorfm/authM/internal/domain"
+	"github.com/manorfm/authM/internal/infrastructure/config"
 	"go.uber.org/zap"
 )
 

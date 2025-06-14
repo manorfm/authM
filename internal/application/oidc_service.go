@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/ipede/user-manager-service/internal/domain"
-	"github.com/ipede/user-manager-service/internal/infrastructure/config"
+	"github.com/manorfm/authM/internal/domain"
+	"github.com/manorfm/authM/internal/infrastructure/config"
 	"github.com/oklog/ulid/v2"
 	"go.uber.org/zap"
 )

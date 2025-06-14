@@ -6,7 +6,7 @@ import (
 	"encoding/base64"
 	"time"
 
-	"github.com/ipede/user-manager-service/internal/domain"
+	"github.com/manorfm/authM/internal/domain"
 	"github.com/oklog/ulid/v2"
 	"go.uber.org/zap"
 )

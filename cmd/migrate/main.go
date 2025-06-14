@@ -11,8 +11,8 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
-	"github.com/ipede/user-manager-service/internal/infrastructure/config"
-	"github.com/ipede/user-manager-service/internal/infrastructure/database"
+	"github.com/manorfm/authM/internal/infrastructure/config"
+	"github.com/manorfm/authM/internal/infrastructure/database"
 	"go.uber.org/zap"
 )
 

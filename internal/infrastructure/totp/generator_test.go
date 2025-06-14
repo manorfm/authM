@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ipede/user-manager-service/internal/domain"
+	"github.com/manorfm/authM/internal/domain"
 	"github.com/pquerna/otp/totp"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"

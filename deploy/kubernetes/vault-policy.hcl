@@ -1,7 +1,7 @@
-path "user-manager-service/data/config" {
+path "authM/data/config" {
   capabilities = ["read"]
 }
 
-path "user-manager-service/data/*" {
+path "authM/data/*" {
   capabilities = ["read"]
 } 

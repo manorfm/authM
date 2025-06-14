@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/ipede/user-manager-service/internal/domain"
+	"github.com/manorfm/authM/internal/domain"
 	"go.uber.org/zap"
 )
 

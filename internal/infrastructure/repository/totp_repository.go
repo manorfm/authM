@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/ipede/user-manager-service/internal/domain"
-	"github.com/ipede/user-manager-service/internal/infrastructure/database"
+	"github.com/manorfm/authM/internal/domain"
+	"github.com/manorfm/authM/internal/infrastructure/database"
 	"github.com/jackc/pgx/v5"
 	"go.uber.org/zap"
 )

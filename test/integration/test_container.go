@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ipede/user-manager-service/internal/infrastructure/config"
-	"github.com/ipede/user-manager-service/internal/infrastructure/database"
+	"github.com/manorfm/authM/internal/infrastructure/config"
+	"github.com/manorfm/authM/internal/infrastructure/database"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"

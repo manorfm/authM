@@ -1,25 +1,25 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: user-manager-service
+  name: authM
   labels:
-    app: user-manager-service
+    app: authM
 spec:
   replicas: 3
   selector:
     matchLabels:
-      app: user-manager-service
+      app: authM
   template:
     metadata:
       labels:
-        app: user-manager-service
+        app: authM
       annotations:
         vault.hashicorp.com/agent-inject: "true"
         vault.hashicorp.com/agent-inject-status: "update"
-        vault.hashicorp.com/role: "user-manager"
-        vault.hashicorp.com/agent-inject-secret-config: "user-manager-service/data/config"
+        vault.hashicorp.com/role: "authM"
+        vault.hashicorp.com/agent-inject-secret-config: "authM/data/config"
         vault.hashicorp.com/agent-inject-template-config: |
-          {{- with secret "user-manager-service/data/config" -}}
+          {{- with secret "authM/data/config" -}}
           export DB_HOST="{{ .Data.data.db_host }}"
           export DB_PORT="{{ .Data.data.db_port }}"
           export DB_NAME="{{ .Data.data.db_name }}"
@@ -31,10 +31,10 @@ spec:
           export SMTP_PASSWORD="{{ .Data.data.smtp_password }}"
           {{- end -}}
     spec:
-      serviceAccountName: user-manager-service-vault-auth
+      serviceAccountName: authM-vault-auth
       containers:
-      - name: user-manager-service
-        image: user-manager-service:latest
+      - name: authM
+        image: authM:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8080
@@ -83,10 +83,10 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: user-manager-service
+  name: authM
 spec:
   selector:
-    app: user-manager-service
+    app: authM
   ports:
   - port: 80
     targetPort: 8080

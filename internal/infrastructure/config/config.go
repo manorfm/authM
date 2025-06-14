@@ -91,7 +91,7 @@ func LoadConfig(logger *zap.Logger) (*Config, error) {
 		EnableVault:    getEnv("ENABLE_VAULT", "true") == "true",
 		VaultAddress:   getEnv("VAULT_ADDRESS", "http://localhost:8200"),
 		VaultToken:     getEnv("VAULT_TOKEN", ""),
-		VaultMountPath: getEnv("VAULT_MOUNT_PATH", "transit/user-manager-service"),
+		VaultMountPath: getEnv("VAULT_MOUNT_PATH", "transit/authM"),
 		VaultKeyName:   getEnv("VAULT_KEY_NAME", "jwt-signing-key"),
 
 		ServerURL: getEnv("SERVER_URL", "http://localhost:8080"),
