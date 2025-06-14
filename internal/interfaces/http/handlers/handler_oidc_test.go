@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
@@ -19,6 +20,14 @@ import (
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"
 )
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+
+	os.Remove("test-key")
+
+	os.Exit(code)
+}
 
 // MockAuthService is a mock implementation of domain.AuthService
 type MockAuthService struct {
